@@ -2,6 +2,8 @@ import pandas as pd
 import os
 import numpy as np
 from datetime import datetime
+from database import session, AireAcondicionado, Lectura, init_db
+from sqlalchemy import func, distinct
 
 class DataManager:
     def __init__(self):
@@ -13,90 +15,155 @@ class DataManager:
         if not os.path.exists(self.data_dir):
             os.makedirs(self.data_dir)
         
-        # Cargar o crear archivos de datos
-        self.cargar_datos()
-    
-    def cargar_datos(self):
-        # Cargar o crear el archivo de aires acondicionados
-        if os.path.exists(self.aires_file):
-            self.aires_df = pd.read_csv(self.aires_file)
-        else:
-            # Crear DataFrame con los 7 aires predeterminados
-            self.aires_df = pd.DataFrame({
-                'id': range(1, 8),
-                'nombre': [f'Aire {i}' for i in range(1, 8)],
-                'ubicacion': ['Ubicación por definir' for _ in range(7)],
-                'fecha_instalacion': [datetime.now().strftime('%Y-%m-%d') for _ in range(7)]
-            })
-            self.guardar_aires()
+        # Inicializar la base de datos
+        init_db()
         
-        # Cargar o crear el archivo de lecturas
-        if os.path.exists(self.lecturas_file):
-            self.lecturas_df = pd.read_csv(self.lecturas_file)
-            # Convertir fecha a datetime
-            self.lecturas_df['fecha'] = pd.to_datetime(self.lecturas_df['fecha'])
-        else:
-            self.lecturas_df = pd.DataFrame(columns=[
-                'id', 'aire_id', 'fecha', 'temperatura', 'humedad'
-            ])
-            self.guardar_lecturas()
+        # Migrar datos de CSV a base de datos si es necesario
+        self.migrar_datos_si_necesario()
     
-    def guardar_aires(self):
-        self.aires_df.to_csv(self.aires_file, index=False)
-    
-    def guardar_lecturas(self):
-        self.lecturas_df.to_csv(self.lecturas_file, index=False)
+    def migrar_datos_si_necesario(self):
+        # Verificar si hay datos en la base de datos
+        aires_count = session.query(AireAcondicionado).count()
+        
+        # Solo migrar si no hay datos en la BD y existen los archivos CSV
+        if aires_count == 0:
+            # Migrar aires acondicionados
+            if os.path.exists(self.aires_file):
+                aires_df = pd.read_csv(self.aires_file)
+                for _, row in aires_df.iterrows():
+                    aire = AireAcondicionado(
+                        id=int(row['id']),
+                        nombre=row['nombre'],
+                        ubicacion=row['ubicacion'],
+                        fecha_instalacion=row['fecha_instalacion']
+                    )
+                    session.add(aire)
+                session.commit()
+            else:
+                # Crear aires predeterminados
+                for i in range(1, 8):
+                    aire = AireAcondicionado(
+                        nombre=f'Aire {i}',
+                        ubicacion='Ubicación por definir',
+                        fecha_instalacion=datetime.now().strftime('%Y-%m-%d')
+                    )
+                    session.add(aire)
+                session.commit()
+            
+            # Migrar lecturas si existen
+            if os.path.exists(self.lecturas_file):
+                lecturas_df = pd.read_csv(self.lecturas_file)
+                if not lecturas_df.empty:
+                    # Convertir fecha a datetime si es string
+                    if lecturas_df['fecha'].dtype == 'object':
+                        lecturas_df['fecha'] = pd.to_datetime(lecturas_df['fecha'])
+                    
+                    for _, row in lecturas_df.iterrows():
+                        lectura = Lectura(
+                            id=int(row['id']),
+                            aire_id=int(row['aire_id']),
+                            fecha=row['fecha'],
+                            temperatura=float(row['temperatura']),
+                            humedad=float(row['humedad'])
+                        )
+                        session.add(lectura)
+                    session.commit()
     
     def obtener_aires(self):
-        return self.aires_df
+        # Consultar todos los aires de la base de datos
+        aires = session.query(AireAcondicionado).all()
+        
+        # Convertir a DataFrame
+        aires_data = [
+            {
+                'id': aire.id,
+                'nombre': aire.nombre,
+                'ubicacion': aire.ubicacion,
+                'fecha_instalacion': aire.fecha_instalacion
+            }
+            for aire in aires
+        ]
+        
+        return pd.DataFrame(aires_data)
     
     def obtener_lecturas(self):
-        return self.lecturas_df
+        # Consultar todas las lecturas de la base de datos
+        lecturas = session.query(Lectura).all()
+        
+        # Convertir a DataFrame
+        lecturas_data = [
+            {
+                'id': lectura.id,
+                'aire_id': lectura.aire_id,
+                'fecha': lectura.fecha,
+                'temperatura': lectura.temperatura,
+                'humedad': lectura.humedad
+            }
+            for lectura in lecturas
+        ]
+        
+        return pd.DataFrame(lecturas_data)
     
     def agregar_aire(self, nombre, ubicacion, fecha_instalacion):
-        # Generar nuevo ID (máximo actual + 1)
-        nuevo_id = 1
-        if not self.aires_df.empty:
-            nuevo_id = self.aires_df['id'].max() + 1
+        # Crear nuevo aire acondicionado en la base de datos
+        nuevo_aire = AireAcondicionado(
+            nombre=nombre,
+            ubicacion=ubicacion,
+            fecha_instalacion=fecha_instalacion
+        )
         
-        # Agregar nuevo aire
-        nuevo_aire = pd.DataFrame({
-            'id': [nuevo_id],
-            'nombre': [nombre],
-            'ubicacion': [ubicacion],
-            'fecha_instalacion': [fecha_instalacion]
-        })
+        session.add(nuevo_aire)
+        session.commit()
         
-        self.aires_df = pd.concat([self.aires_df, nuevo_aire], ignore_index=True)
-        self.guardar_aires()
-        return nuevo_id
+        return nuevo_aire.id
     
     def agregar_lectura(self, aire_id, fecha, temperatura, humedad):
-        # Generar nuevo ID (máximo actual + 1)
-        nuevo_id = 1
-        if not self.lecturas_df.empty:
-            nuevo_id = self.lecturas_df['id'].max() + 1
+        # Crear nueva lectura en la base de datos
+        nueva_lectura = Lectura(
+            aire_id=aire_id,
+            fecha=fecha,
+            temperatura=temperatura,
+            humedad=humedad
+        )
         
-        # Agregar nueva lectura
-        nueva_lectura = pd.DataFrame({
-            'id': [nuevo_id],
-            'aire_id': [aire_id],
-            'fecha': [fecha],
-            'temperatura': [temperatura],
-            'humedad': [humedad]
-        })
+        session.add(nueva_lectura)
+        session.commit()
         
-        self.lecturas_df = pd.concat([self.lecturas_df, nueva_lectura], ignore_index=True)
-        self.guardar_lecturas()
-        return nuevo_id
+        return nueva_lectura.id
     
     def obtener_lecturas_por_aire(self, aire_id):
-        return self.lecturas_df[self.lecturas_df['aire_id'] == aire_id]
+        # Consultar lecturas de un aire específico
+        lecturas = session.query(Lectura).filter(Lectura.aire_id == aire_id).all()
+        
+        # Convertir a DataFrame
+        lecturas_data = [
+            {
+                'id': lectura.id,
+                'aire_id': lectura.aire_id,
+                'fecha': lectura.fecha,
+                'temperatura': lectura.temperatura,
+                'humedad': lectura.humedad
+            }
+            for lectura in lecturas
+        ]
+        
+        return pd.DataFrame(lecturas_data)
     
     def obtener_estadisticas_por_aire(self, aire_id):
-        lecturas_aire = self.obtener_lecturas_por_aire(aire_id)
+        # Consultar estadísticas de un aire específico desde la base de datos
+        result = session.query(
+            func.avg(Lectura.temperatura).label('temp_avg'),
+            func.min(Lectura.temperatura).label('temp_min'),
+            func.max(Lectura.temperatura).label('temp_max'),
+            func.stddev(Lectura.temperatura).label('temp_std'),
+            func.avg(Lectura.humedad).label('hum_avg'),
+            func.min(Lectura.humedad).label('hum_min'),
+            func.max(Lectura.humedad).label('hum_max'),
+            func.stddev(Lectura.humedad).label('hum_std')
+        ).filter(Lectura.aire_id == aire_id).first()
         
-        if lecturas_aire.empty:
+        # Si no hay lecturas, devolver valores predeterminados
+        if result.temp_avg is None:
             return {
                 'temperatura': {
                     'promedio': 0,
@@ -112,23 +179,36 @@ class DataManager:
                 }
             }
         
+        # Convertir a diccionario
         return {
             'temperatura': {
-                'promedio': round(lecturas_aire['temperatura'].mean(), 2),
-                'minimo': round(lecturas_aire['temperatura'].min(), 2),
-                'maximo': round(lecturas_aire['temperatura'].max(), 2),
-                'desviacion': round(lecturas_aire['temperatura'].std(), 2)
+                'promedio': round(result.temp_avg, 2) if result.temp_avg else 0,
+                'minimo': round(result.temp_min, 2) if result.temp_min else 0,
+                'maximo': round(result.temp_max, 2) if result.temp_max else 0,
+                'desviacion': round(result.temp_std, 2) if result.temp_std else 0
             },
             'humedad': {
-                'promedio': round(lecturas_aire['humedad'].mean(), 2),
-                'minimo': round(lecturas_aire['humedad'].min(), 2),
-                'maximo': round(lecturas_aire['humedad'].max(), 2),
-                'desviacion': round(lecturas_aire['humedad'].std(), 2)
+                'promedio': round(result.hum_avg, 2) if result.hum_avg else 0,
+                'minimo': round(result.hum_min, 2) if result.hum_min else 0,
+                'maximo': round(result.hum_max, 2) if result.hum_max else 0,
+                'desviacion': round(result.hum_std, 2) if result.hum_std else 0
             }
         }
     
     def obtener_estadisticas_generales(self):
-        if self.lecturas_df.empty:
+        # Consultar estadísticas generales desde la base de datos
+        result = session.query(
+            func.avg(Lectura.temperatura).label('temp_avg'),
+            func.min(Lectura.temperatura).label('temp_min'),
+            func.max(Lectura.temperatura).label('temp_max'),
+            func.avg(Lectura.humedad).label('hum_avg'),
+            func.min(Lectura.humedad).label('hum_min'),
+            func.max(Lectura.humedad).label('hum_max'),
+            func.count(distinct(Lectura.id)).label('total_lecturas')
+        ).first()
+        
+        # Si no hay lecturas, devolver valores predeterminados
+        if result.temp_avg is None:
             return {
                 'temperatura': {
                     'promedio': 0,
@@ -143,38 +223,47 @@ class DataManager:
                 'total_lecturas': 0
             }
         
+        # Convertir a diccionario
         return {
             'temperatura': {
-                'promedio': round(self.lecturas_df['temperatura'].mean(), 2),
-                'minimo': round(self.lecturas_df['temperatura'].min(), 2),
-                'maximo': round(self.lecturas_df['temperatura'].max(), 2)
+                'promedio': round(result.temp_avg, 2) if result.temp_avg else 0,
+                'minimo': round(result.temp_min, 2) if result.temp_min else 0,
+                'maximo': round(result.temp_max, 2) if result.temp_max else 0
             },
             'humedad': {
-                'promedio': round(self.lecturas_df['humedad'].mean(), 2),
-                'minimo': round(self.lecturas_df['humedad'].min(), 2),
-                'maximo': round(self.lecturas_df['humedad'].max(), 2)
+                'promedio': round(result.hum_avg, 2) if result.hum_avg else 0,
+                'minimo': round(result.hum_min, 2) if result.hum_min else 0,
+                'maximo': round(result.hum_max, 2) if result.hum_max else 0
             },
-            'total_lecturas': len(self.lecturas_df)
+            'total_lecturas': result.total_lecturas or 0
         }
     
     def eliminar_aire(self, aire_id):
-        # Eliminar el aire del DataFrame
-        self.aires_df = self.aires_df[self.aires_df['id'] != aire_id]
-        self.guardar_aires()
+        # Obtener el aire a eliminar
+        aire = session.query(AireAcondicionado).filter(AireAcondicionado.id == aire_id).first()
         
-        # Eliminar lecturas asociadas
-        self.lecturas_df = self.lecturas_df[self.lecturas_df['aire_id'] != aire_id]
-        self.guardar_lecturas()
+        if aire:
+            # SQLAlchemy eliminará automáticamente las lecturas asociadas debido a la relación cascade
+            session.delete(aire)
+            session.commit()
     
     def exportar_datos(self, formato='csv'):
+        # Asegurar que el directorio exista
+        if not os.path.exists(self.data_dir):
+            os.makedirs(self.data_dir)
+        
+        # Obtener datos de la base de datos
+        aires_df = self.obtener_aires()
+        lecturas_df = self.obtener_lecturas()
+        
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         
         if formato == 'csv':
             aires_export = os.path.join(self.data_dir, f'aires_export_{timestamp}.csv')
             lecturas_export = os.path.join(self.data_dir, f'lecturas_export_{timestamp}.csv')
             
-            self.aires_df.to_csv(aires_export, index=False)
-            self.lecturas_df.to_csv(lecturas_export, index=False)
+            aires_df.to_csv(aires_export, index=False)
+            lecturas_df.to_csv(lecturas_export, index=False)
             
             return aires_export, lecturas_export
         
@@ -182,8 +271,8 @@ class DataManager:
             export_file = os.path.join(self.data_dir, f'export_{timestamp}.xlsx')
             
             with pd.ExcelWriter(export_file) as writer:
-                self.aires_df.to_excel(writer, sheet_name='Aires', index=False)
-                self.lecturas_df.to_excel(writer, sheet_name='Lecturas', index=False)
+                aires_df.to_excel(writer, sheet_name='Aires', index=False)
+                lecturas_df.to_excel(writer, sheet_name='Lecturas', index=False)
             
             return export_file
         

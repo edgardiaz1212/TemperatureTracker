@@ -9,12 +9,16 @@ import os
 import base64
 
 from data_manager import DataManager
+from database import init_db
 from utils import (
     crear_grafico_temperatura_humedad,
     crear_grafico_comparativo,
     crear_grafico_variacion,
     generar_reporte_estadistico
 )
+
+# Inicializar la base de datos
+init_db()
 
 # Configurar la página
 st.set_page_config(
