@@ -162,6 +162,23 @@ def mostrar_registro_lecturas():
         # Fecha de la lectura
         fecha = st.date_input("Fecha de la lectura:", datetime.now())
         
+        # Horarios predefinidos
+        horas_predefinidas = {
+            "2:00 AM": "02:00:00",
+            "6:00 AM": "06:00:00",
+            "9:00 AM": "09:00:00",
+            "12:00 PM": "12:00:00",
+            "3:00 PM": "15:00:00",
+            "6:00 PM": "18:00:00",
+            "10:00 PM": "22:00:00"
+        }
+        
+        # Selección de hora
+        hora_seleccionada = st.selectbox(
+            "Hora de la lectura:",
+            options=list(horas_predefinidas.keys())
+        )
+        
         # Valores de temperatura y humedad
         col1, col2 = st.columns(2)
         
@@ -187,8 +204,12 @@ def mostrar_registro_lecturas():
         submitted = st.form_submit_button("Registrar Lectura")
         
         if submitted:
-            # Convertir fecha a datetime
-            fecha_dt = pd.to_datetime(fecha)
+            # Obtener la hora seleccionada
+            hora_str = horas_predefinidas[hora_seleccionada]
+            
+            # Combinar fecha y hora para crear el datetime
+            fecha_hora_str = f"{fecha.strftime('%Y-%m-%d')} {hora_str}"
+            fecha_dt = pd.to_datetime(fecha_hora_str)
             
             # Agregar lectura
             lectura_id = data_manager.agregar_lectura(
@@ -219,7 +240,11 @@ def mostrar_registro_lecturas():
         
         # Seleccionar y renombrar columnas para mostrar
         lecturas_display = lecturas_con_info[['id', 'nombre', 'fecha', 'temperatura', 'humedad']].copy()
-        lecturas_display.columns = ['ID Lectura', 'Aire', 'Fecha', 'Temperatura (°C)', 'Humedad (%)']
+        
+        # Formatear la fecha para incluir fecha y hora
+        lecturas_display['fecha'] = lecturas_display['fecha'].dt.strftime('%Y-%m-%d %H:%M')
+        
+        lecturas_display.columns = ['ID Lectura', 'Aire', 'Fecha y Hora', 'Temperatura (°C)', 'Humedad (%)']
         
         # Mostrar tabla con las últimas 10 lecturas
         st.dataframe(lecturas_display.head(10), use_container_width=True)
