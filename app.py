@@ -31,23 +31,162 @@ st.set_page_config(
 # Instanciar el gestor de datos
 @st.cache_resource
 def get_data_manager():
-    return DataManager()
+    dm = DataManager()
+    # Crear usuario administrador por defecto si no existe ninguno
+    dm.crear_admin_por_defecto()
+    return dm
 
 data_manager = get_data_manager()
 
-# Sidebar para navegación
-st.sidebar.title("Monitoreo AC")
-paginas = [
-    "Dashboard",
-    "Registro de Lecturas",
-    "Gestión de Aires",
-    "Registro de Mantenimientos",
-    "Análisis y Estadísticas",
-    "Configuración de Umbrales",
-    "Exportar Datos"
-]
+# Configurar variables de sesión
+if 'logged_in' not in st.session_state:
+    st.session_state.logged_in = False
+    
+if 'user_id' not in st.session_state:
+    st.session_state.user_id = None
+    
+if 'user_name' not in st.session_state:
+    st.session_state.user_name = None
+    
+if 'user_role' not in st.session_state:
+    st.session_state.user_role = None
 
-pagina_seleccionada = st.sidebar.radio("Navegar a:", paginas)
+# Funciones para las páginas de autenticación
+def mostrar_login():
+    st.title("Iniciar Sesión")
+    
+    with st.form("login_form"):
+        username = st.text_input("Usuario o Email")
+        password = st.text_input("Contraseña", type="password")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            submit_button = st.form_submit_button("Iniciar Sesión", use_container_width=True)
+        
+        with col2:
+            if st.form_submit_button("Registrarse", use_container_width=True):
+                st.session_state.show_page = "registro"
+                st.rerun()
+        
+        if submit_button:
+            if username and password:
+                # Verificar credenciales
+                usuario = data_manager.verificar_credenciales(username, password)
+                
+                if usuario:
+                    # Guardar información de la sesión
+                    st.session_state.logged_in = True
+                    st.session_state.user_id = usuario.id
+                    st.session_state.user_name = f"{usuario.nombre} {usuario.apellido}"
+                    st.session_state.user_role = usuario.rol
+                    st.session_state.show_page = "dashboard"
+                    st.success(f"Bienvenido/a, {usuario.nombre}!")
+                    st.rerun()
+                else:
+                    st.error("Credenciales inválidas. Por favor, intenta de nuevo.")
+            else:
+                st.error("Por favor, completa todos los campos.")
+
+def mostrar_registro():
+    st.title("Registro de Usuario")
+    
+    with st.form("registro_form"):
+        nombre = st.text_input("Nombre")
+        apellido = st.text_input("Apellido")
+        email = st.text_input("Email")
+        username = st.text_input("Nombre de Usuario")
+        password = st.text_input("Contraseña", type="password")
+        password_confirm = st.text_input("Confirmar Contraseña", type="password")
+        
+        # Sólo mostrar selección de rol si hay un administrador conectado
+        rol = "operador"  # Rol por defecto
+        if st.session_state.logged_in and st.session_state.user_role == "admin":
+            roles = ["operador", "supervisor", "admin"]
+            rol = st.selectbox("Rol", options=roles)
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            submit_button = st.form_submit_button("Registrarse", use_container_width=True)
+        
+        with col2:
+            if st.form_submit_button("Volver al inicio de sesión", use_container_width=True):
+                st.session_state.show_page = "login"
+                st.rerun()
+        
+        if submit_button:
+            if nombre and apellido and email and username and password and password_confirm:
+                if password != password_confirm:
+                    st.error("Las contraseñas no coinciden.")
+                else:
+                    # Crear usuario
+                    usuario_id = data_manager.crear_usuario(
+                        nombre=nombre,
+                        apellido=apellido,
+                        email=email,
+                        username=username,
+                        password=password,
+                        rol=rol
+                    )
+                    
+                    if usuario_id:
+                        st.success(f"Usuario registrado exitosamente! Ya puedes iniciar sesión.")
+                        # Redirigir a login
+                        st.session_state.show_page = "login"
+                        st.rerun()
+                    else:
+                        st.error("No se pudo crear el usuario. El email o nombre de usuario ya están en uso.")
+            else:
+                st.error("Por favor, completa todos los campos.")
+
+def mostrar_logout():
+    if st.sidebar.button("Cerrar Sesión", use_container_width=True):
+        for key in st.session_state.keys():
+            del st.session_state[key]
+        st.rerun()
+
+# Inicializar estado de la página
+if 'show_page' not in st.session_state:
+    st.session_state.show_page = "login"
+
+# Sidebar para navegación (mostrar solo si el usuario está autenticado)
+if st.session_state.logged_in:
+    st.sidebar.title("Monitoreo AC")
+    
+    # Mostrar información del usuario
+    st.sidebar.write(f"Usuario: {st.session_state.user_name}")
+    st.sidebar.write(f"Rol: {st.session_state.user_role}")
+    
+    # Opciones de navegación según el rol
+    if st.session_state.user_role in ["admin", "supervisor"]:
+        paginas = [
+            "Dashboard",
+            "Registro de Lecturas",
+            "Gestión de Aires",
+            "Registro de Mantenimientos",
+            "Análisis y Estadísticas",
+            "Configuración de Umbrales",
+            "Gestión de Usuarios",
+            "Exportar Datos"
+        ]
+    else:  # operador
+        paginas = [
+            "Dashboard",
+            "Registro de Lecturas",
+            "Análisis y Estadísticas"
+        ]
+    
+    pagina_seleccionada = st.sidebar.radio("Navegar a:", paginas)
+    
+    # Opción para cerrar sesión
+    mostrar_logout()
+else:
+    # Si el usuario no está autenticado, mostrar el formulario de login o registro
+    if st.session_state.show_page == "login":
+        mostrar_login()
+        st.stop()  # Detener la ejecución aquí
+    elif st.session_state.show_page == "registro":
+        mostrar_registro()
+        st.stop()  # Detener la ejecución aquí
 
 # Función para mostrar el dashboard principal
 def mostrar_dashboard():
@@ -1439,6 +1578,124 @@ def mostrar_configuracion_umbrales():
         if st.button("Actualizar Lista"):
             st.rerun()
 
+# Función para la página de gestión de usuarios
+def mostrar_gestion_usuarios():
+    st.title("Gestión de Usuarios")
+    
+    # Verificar que sea un administrador
+    if st.session_state.user_role != "admin":
+        st.warning("No tienes permiso para acceder a esta página.")
+        return
+    
+    # Crear tabs para organizar las diferentes funcionalidades
+    tab1, tab2 = st.tabs(["Usuarios", "Crear Usuario"])
+    
+    with tab1:
+        st.subheader("Usuarios Registrados")
+        
+        # Obtener todos los usuarios
+        usuarios_df = data_manager.obtener_usuarios(solo_activos=False)
+        
+        if not usuarios_df.empty:
+            # Formatear fechas
+            if 'fecha_registro' in usuarios_df.columns:
+                usuarios_df['fecha_registro'] = pd.to_datetime(usuarios_df['fecha_registro']).dt.strftime('%Y-%m-%d %H:%M')
+            
+            if 'ultima_conexion' in usuarios_df.columns and usuarios_df['ultima_conexion'].notnull().any():
+                usuarios_df['ultima_conexion'] = pd.to_datetime(usuarios_df['ultima_conexion']).dt.strftime('%Y-%m-%d %H:%M')
+            
+            # Mostrar tabla de usuarios
+            st.dataframe(usuarios_df, use_container_width=True)
+            
+            # Sección para editar usuario
+            st.subheader("Editar Usuario")
+            
+            # Crear opciones con detalles de cada usuario
+            usuario_options = [(f"{row['username']} - {row['nombre']} {row['apellido']} ({row['rol']})", row['id']) 
+                              for _, row in usuarios_df.iterrows()]
+            
+            if usuario_options:
+                usuario_seleccionado_texto, usuario_seleccionado_id = st.selectbox(
+                    "Seleccionar Usuario a Editar:",
+                    options=usuario_options,
+                    format_func=lambda x: x[0]
+                )
+                
+                # Obtener el usuario seleccionado
+                usuario_row = usuarios_df[usuarios_df['id'] == usuario_seleccionado_id].iloc[0]
+                
+                with st.form("formulario_editar_usuario"):
+                    nombre_edit = st.text_input("Nombre:", value=usuario_row['nombre'])
+                    apellido_edit = st.text_input("Apellido:", value=usuario_row['apellido'])
+                    email_edit = st.text_input("Email:", value=usuario_row['email'])
+                    rol_edit = st.selectbox("Rol:", options=["operador", "supervisor", "admin"], index=["operador", "supervisor", "admin"].index(usuario_row['rol']))
+                    activo_edit = st.checkbox("Usuario Activo", value=usuario_row['activo'])
+                    
+                    submit_edit_button = st.form_submit_button("Actualizar Usuario", use_container_width=True)
+                    
+                    if submit_edit_button:
+                        if nombre_edit and apellido_edit and email_edit:
+                            # Actualizar usuario
+                            actualizado = data_manager.actualizar_usuario(
+                                usuario_id=usuario_seleccionado_id,
+                                nombre=nombre_edit,
+                                apellido=apellido_edit,
+                                email=email_edit,
+                                rol=rol_edit,
+                                activo=activo_edit
+                            )
+                            
+                            if actualizado:
+                                st.success("Usuario actualizado exitosamente")
+                                st.rerun()
+                            else:
+                                st.error("No se pudo actualizar el usuario. Verifica si el email ya está en uso.")
+                        else:
+                            st.error("Por favor, completa todos los campos.")
+            else:
+                st.info("No hay usuarios para editar.")
+        else:
+            st.info("No hay usuarios registrados.")
+    
+    with tab2:
+        st.subheader("Crear Nuevo Usuario")
+        
+        with st.form("formulario_crear_usuario"):
+            nombre = st.text_input("Nombre:")
+            apellido = st.text_input("Apellido:")
+            email = st.text_input("Email:")
+            username = st.text_input("Nombre de Usuario:")
+            password = st.text_input("Contraseña:", type="password")
+            password_confirm = st.text_input("Confirmar Contraseña:", type="password")
+            
+            roles = ["operador", "supervisor", "admin"]
+            rol = st.selectbox("Rol:", options=roles)
+            
+            submit_button = st.form_submit_button("Crear Usuario", type="primary")
+            
+            if submit_button:
+                if nombre and apellido and email and username and password and password_confirm:
+                    if password != password_confirm:
+                        st.error("Las contraseñas no coinciden.")
+                    else:
+                        # Crear usuario
+                        usuario_id = data_manager.crear_usuario(
+                            nombre=nombre,
+                            apellido=apellido,
+                            email=email,
+                            username=username,
+                            password=password,
+                            rol=rol
+                        )
+                        
+                        if usuario_id:
+                            st.success(f"Usuario creado exitosamente con ID: {usuario_id}")
+                            st.rerun()
+                        else:
+                            st.error("No se pudo crear el usuario. El email o nombre de usuario ya están en uso.")
+                else:
+                    st.error("Por favor, completa todos los campos.")
+
 def mostrar_exportar_datos():
     st.title("Exportar Datos")
     
@@ -1548,5 +1805,7 @@ elif pagina_seleccionada == "Análisis y Estadísticas":
     mostrar_analisis_estadisticas()
 elif pagina_seleccionada == "Configuración de Umbrales":
     mostrar_configuracion_umbrales()
+elif pagina_seleccionada == "Gestión de Usuarios":
+    mostrar_gestion_usuarios()
 elif pagina_seleccionada == "Exportar Datos":
     mostrar_exportar_datos()

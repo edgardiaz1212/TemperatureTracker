@@ -114,6 +114,24 @@ class UmbralConfiguracion(Base):
         else:
             return f"<UmbralConfiguracion(id={self.id}, nombre='{self.nombre}', aire_id={self.aire_id})>"
 
+# Definir el modelo para usuarios
+class Usuario(Base):
+    __tablename__ = 'usuarios'
+    
+    id = Column(Integer, primary_key=True)
+    nombre = Column(String(100), nullable=False)
+    apellido = Column(String(100), nullable=False)
+    email = Column(String(100), nullable=False, unique=True)
+    username = Column(String(50), nullable=False, unique=True)
+    password = Column(String(255), nullable=False)  # Almacenará hash de la contraseña
+    rol = Column(String(20), nullable=False, default='operador')  # admin, supervisor, operador, etc.
+    activo = Column(Boolean, default=True)
+    fecha_registro = Column(DateTime, nullable=False, default=datetime.now)
+    ultima_conexion = Column(DateTime, nullable=True)
+    
+    def __repr__(self):
+        return f"<Usuario(id={self.id}, username='{self.username}', rol='{self.rol}')>"
+
 # Crear todas las tablas en la base de datos
 def init_db():
     Base.metadata.create_all(engine)

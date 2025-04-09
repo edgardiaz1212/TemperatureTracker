@@ -3,7 +3,9 @@ import os
 import numpy as np
 import io
 from datetime import datetime
-from database import session, AireAcondicionado, Lectura, Mantenimiento, UmbralConfiguracion, init_db
+from database import session, AireAcondicionado, Lectura, Mantenimiento, UmbralConfiguracion, Usuario, init_db
+from cryptography.fernet import Fernet
+import hashlib
 from sqlalchemy import func, distinct
 
 class DataManager:
@@ -807,3 +809,245 @@ class DataManager:
             return export_file
         
         return None
+        
+    # Métodos para gestión de usuarios
+    def _hash_password(self, password):
+        """
+        Crea un hash seguro de la contraseña.
+        
+        Args:
+            password: Contraseña en texto plano
+            
+        Returns:
+            Hash de la contraseña
+        """
+        # Crear un hash SHA-256 de la contraseña
+        return hashlib.sha256(password.encode()).hexdigest()
+    
+    def crear_usuario(self, nombre, apellido, email, username, password, rol='operador'):
+        """
+        Crea un nuevo usuario en la base de datos.
+        
+        Args:
+            nombre: Nombre del usuario
+            apellido: Apellido del usuario
+            email: Correo electrónico único
+            username: Nombre de usuario único
+            password: Contraseña (se almacenará como hash)
+            rol: Rol del usuario (admin, supervisor, operador, etc.)
+            
+        Returns:
+            ID del usuario creado o None si ya existe un usuario con ese email o username
+        """
+        # Verificar si ya existe un usuario con ese email o username
+        usuario_existente = session.query(Usuario).filter(
+            (Usuario.email == email) | (Usuario.username == username)
+        ).first()
+        
+        if usuario_existente:
+            return None
+        
+        # Hashear la contraseña
+        password_hash = self._hash_password(password)
+        
+        # Crear nuevo usuario
+        nuevo_usuario = Usuario(
+            nombre=nombre,
+            apellido=apellido,
+            email=email,
+            username=username,
+            password=password_hash,
+            rol=rol,
+            fecha_registro=datetime.now()
+        )
+        
+        session.add(nuevo_usuario)
+        try:
+            session.commit()
+            return nuevo_usuario.id
+        except:
+            session.rollback()
+            return None
+    
+    def verificar_credenciales(self, username, password):
+        """
+        Verifica las credenciales de inicio de sesión.
+        
+        Args:
+            username: Nombre de usuario o email
+            password: Contraseña en texto plano
+            
+        Returns:
+            Usuario si las credenciales son válidas, None en caso contrario
+        """
+        # Hashear la contraseña para comparar
+        password_hash = self._hash_password(password)
+        
+        # Buscar usuario por username o email
+        usuario = session.query(Usuario).filter(
+            ((Usuario.username == username) | (Usuario.email == username)) &
+            (Usuario.password == password_hash) &
+            (Usuario.activo == True)
+        ).first()
+        
+        if usuario:
+            # Actualizar última conexión
+            usuario.ultima_conexion = datetime.now()
+            session.commit()
+            
+        return usuario
+    
+    def obtener_usuario_por_id(self, usuario_id):
+        """
+        Obtiene un usuario por su ID.
+        
+        Args:
+            usuario_id: ID del usuario
+            
+        Returns:
+            Objeto Usuario o None si no existe
+        """
+        return session.query(Usuario).filter(Usuario.id == usuario_id).first()
+    
+    def obtener_usuarios(self, solo_activos=True):
+        """
+        Obtiene todos los usuarios.
+        
+        Args:
+            solo_activos: Si True, devuelve solo usuarios activos
+            
+        Returns:
+            DataFrame con los usuarios
+        """
+        # Construir la consulta
+        query = session.query(Usuario)
+        
+        if solo_activos:
+            query = query.filter(Usuario.activo == True)
+        
+        usuarios = query.all()
+        
+        # Convertir a DataFrame
+        usuarios_data = [
+            {
+                'id': u.id,
+                'nombre': u.nombre,
+                'apellido': u.apellido,
+                'email': u.email,
+                'username': u.username,
+                'rol': u.rol,
+                'activo': u.activo,
+                'fecha_registro': u.fecha_registro,
+                'ultima_conexion': u.ultima_conexion
+            }
+            for u in usuarios
+        ]
+        
+        return pd.DataFrame(usuarios_data)
+    
+    def actualizar_usuario(self, usuario_id, nombre=None, apellido=None, email=None, rol=None, activo=None):
+        """
+        Actualiza la información de un usuario.
+        
+        Args:
+            usuario_id: ID del usuario a actualizar
+            nombre: Nuevo nombre (opcional)
+            apellido: Nuevo apellido (opcional)
+            email: Nuevo email (opcional)
+            rol: Nuevo rol (opcional)
+            activo: Nuevo estado de activación (opcional)
+            
+        Returns:
+            True si se actualizó correctamente, False en caso contrario
+        """
+        usuario = self.obtener_usuario_por_id(usuario_id)
+        
+        if not usuario:
+            return False
+        
+        # Actualizar solo los campos proporcionados
+        if nombre is not None:
+            usuario.nombre = nombre
+        
+        if apellido is not None:
+            usuario.apellido = apellido
+        
+        if email is not None:
+            # Verificar que el email no esté en uso por otro usuario
+            email_existente = session.query(Usuario).filter(
+                (Usuario.email == email) & (Usuario.id != usuario_id)
+            ).first()
+            
+            if email_existente:
+                return False
+                
+            usuario.email = email
+        
+        if rol is not None:
+            usuario.rol = rol
+        
+        if activo is not None:
+            usuario.activo = activo
+        
+        try:
+            session.commit()
+            return True
+        except:
+            session.rollback()
+            return False
+    
+    def cambiar_password(self, usuario_id, password_actual, password_nueva):
+        """
+        Cambia la contraseña de un usuario.
+        
+        Args:
+            usuario_id: ID del usuario
+            password_actual: Contraseña actual en texto plano
+            password_nueva: Nueva contraseña en texto plano
+            
+        Returns:
+            True si se cambió correctamente, False en caso contrario
+        """
+        usuario = self.obtener_usuario_por_id(usuario_id)
+        
+        if not usuario:
+            return False
+        
+        # Verificar contraseña actual
+        if usuario.password != self._hash_password(password_actual):
+            return False
+        
+        # Actualizar contraseña
+        usuario.password = self._hash_password(password_nueva)
+        
+        try:
+            session.commit()
+            return True
+        except:
+            session.rollback()
+            return False
+            
+    def crear_admin_por_defecto(self):
+        """
+        Crea un usuario administrador por defecto si no existe ningún usuario en el sistema.
+        
+        Returns:
+            True si se creó el admin, False si ya existían usuarios
+        """
+        # Verificar si ya existen usuarios
+        usuarios_count = session.query(Usuario).count()
+        
+        if usuarios_count > 0:
+            return False
+        
+        # Crear admin por defecto
+        self.crear_usuario(
+            nombre="Administrador",
+            apellido="Sistema",
+            email="admin@sistema.com",
+            username="admin",
+            password="admin123",
+            rol="admin"
+        )
+        
+        return True
