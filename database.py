@@ -5,6 +5,7 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
 from datetime import datetime
 
+
 # Obtener la URL de conexión desde las variables de entorno
 DATABASE_URL = os.environ.get('DATABASE_URL')
 
