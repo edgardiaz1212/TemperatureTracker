@@ -3,7 +3,7 @@ import os
 import numpy as np
 import io
 from datetime import datetime
-from database import session, AireAcondicionado, Lectura, Mantenimiento, init_db
+from database import session, AireAcondicionado, Lectura, Mantenimiento, UmbralConfiguracion, init_db
 from sqlalchemy import func, distinct
 
 class DataManager:
@@ -499,6 +499,269 @@ class DataManager:
             return True
         
         return False
+    
+    def crear_umbral_configuracion(self, nombre, es_global, temp_min, temp_max, hum_min, hum_max, aire_id=None, notificar_activo=True):
+        """
+        Crea una nueva configuración de umbrales para temperatura y humedad.
+        
+        Args:
+            nombre: Nombre descriptivo para esta configuración
+            es_global: Si es True, aplica a todos los aires. Si es False, aplica solo al aire_id especificado
+            temp_min: Temperatura mínima aceptable
+            temp_max: Temperatura máxima aceptable
+            hum_min: Humedad mínima aceptable
+            hum_max: Humedad máxima aceptable
+            aire_id: ID del aire acondicionado (solo si es_global=False)
+            notificar_activo: Si las notificaciones están activas para estos umbrales
+            
+        Returns:
+            ID de la configuración creada
+        """
+        # Verificar validez de los umbrales
+        if temp_min >= temp_max or hum_min >= hum_max:
+            return None
+            
+        # Si no es global, debe tener un aire_id
+        if not es_global and aire_id is None:
+            return None
+            
+        # Si es global, el aire_id debe ser None
+        if es_global:
+            aire_id = None
+            
+        # Crear nuevo umbral
+        nuevo_umbral = UmbralConfiguracion(
+            nombre=nombre,
+            es_global=es_global,
+            aire_id=aire_id,
+            temp_min=temp_min,
+            temp_max=temp_max,
+            hum_min=hum_min,
+            hum_max=hum_max,
+            notificar_activo=notificar_activo
+        )
+        
+        session.add(nuevo_umbral)
+        session.commit()
+        
+        return nuevo_umbral.id
+        
+    def obtener_umbrales_configuracion(self, aire_id=None, solo_globales=False):
+        """
+        Obtiene todas las configuraciones de umbrales, opcionalmente filtradas por aire_id.
+        
+        Args:
+            aire_id: ID del aire acondicionado para filtrar, o None para todos
+            solo_globales: Si es True, devuelve solo las configuraciones globales
+            
+        Returns:
+            DataFrame con las configuraciones de umbrales
+        """
+        # Construir la consulta
+        query = session.query(UmbralConfiguracion)
+        
+        # Filtrar según los parámetros
+        if solo_globales:
+            query = query.filter(UmbralConfiguracion.es_global == True)
+        elif aire_id is not None:
+            query = query.filter(
+                (UmbralConfiguracion.aire_id == aire_id) | 
+                (UmbralConfiguracion.es_global == True)
+            )
+        
+        # Ejecutar la consulta
+        umbrales = query.all()
+        
+        # Convertir a DataFrame
+        umbrales_data = [
+            {
+                'id': u.id,
+                'nombre': u.nombre,
+                'es_global': u.es_global,
+                'aire_id': u.aire_id,
+                'temp_min': u.temp_min,
+                'temp_max': u.temp_max,
+                'hum_min': u.hum_min,
+                'hum_max': u.hum_max,
+                'notificar_activo': u.notificar_activo,
+                'fecha_creacion': u.fecha_creacion,
+                'ultima_modificacion': u.ultima_modificacion
+            }
+            for u in umbrales
+        ]
+        
+        # Añadir información del nombre del aire si hay aire_id
+        umbral_df = pd.DataFrame(umbrales_data)
+        
+        if not umbral_df.empty and 'aire_id' in umbral_df.columns:
+            # Filtrar umbrales que tienen aire_id (no son globales)
+            umbrales_con_aire = umbral_df[umbral_df['aire_id'].notnull()]
+            
+            if not umbrales_con_aire.empty:
+                # Obtener todos los aires
+                aires_df = self.obtener_aires()
+                
+                # Mezclar para obtener los nombres
+                umbral_df = pd.merge(
+                    umbral_df,
+                    aires_df[['id', 'nombre']],
+                    how='left',
+                    left_on='aire_id',
+                    right_on='id',
+                    suffixes=('', '_aire')
+                )
+                
+                # Renombrar la columna
+                if 'nombre_aire' in umbral_df.columns:
+                    umbral_df.rename(columns={'nombre_aire': 'aire_nombre'}, inplace=True)
+        
+        return umbral_df
+    
+    def obtener_umbral_por_id(self, umbral_id):
+        """
+        Obtiene una configuración de umbral específica por su ID.
+        
+        Args:
+            umbral_id: ID del umbral a obtener
+            
+        Returns:
+            Objeto UmbralConfiguracion o None si no existe
+        """
+        return session.query(UmbralConfiguracion).filter(UmbralConfiguracion.id == umbral_id).first()
+    
+    def actualizar_umbral_configuracion(self, umbral_id, nombre, temp_min, temp_max, hum_min, hum_max, notificar_activo=True):
+        """
+        Actualiza una configuración de umbral existente.
+        
+        Args:
+            umbral_id: ID de la configuración a actualizar
+            nombre: Nuevo nombre
+            temp_min: Nueva temperatura mínima
+            temp_max: Nueva temperatura máxima
+            hum_min: Nueva humedad mínima
+            hum_max: Nueva humedad máxima
+            notificar_activo: Si las notificaciones están activas
+            
+        Returns:
+            True si se actualizó correctamente, False en caso contrario
+        """
+        # Verificar validez de los umbrales
+        if temp_min >= temp_max or hum_min >= hum_max:
+            return False
+            
+        # Obtener la configuración
+        umbral = self.obtener_umbral_por_id(umbral_id)
+        
+        if umbral:
+            # Actualizar campos
+            umbral.nombre = nombre
+            umbral.temp_min = temp_min
+            umbral.temp_max = temp_max
+            umbral.hum_min = hum_min
+            umbral.hum_max = hum_max
+            umbral.notificar_activo = notificar_activo
+            
+            # No se puede cambiar es_global o aire_id una vez creado
+            
+            session.commit()
+            return True
+            
+        return False
+    
+    def eliminar_umbral_configuracion(self, umbral_id):
+        """
+        Elimina una configuración de umbral por su ID.
+        
+        Args:
+            umbral_id: ID de la configuración a eliminar
+            
+        Returns:
+            True si se eliminó correctamente, False en caso contrario
+        """
+        umbral = self.obtener_umbral_por_id(umbral_id)
+        
+        if umbral:
+            session.delete(umbral)
+            session.commit()
+            return True
+            
+        return False
+        
+    def verificar_lectura_dentro_umbrales(self, aire_id, temperatura, humedad):
+        """
+        Verifica si una lectura está dentro de los umbrales configurados.
+        
+        Args:
+            aire_id: ID del aire acondicionado
+            temperatura: Temperatura a verificar
+            humedad: Humedad a verificar
+            
+        Returns:
+            Diccionario con el resultado de la verificación
+        """
+        # Obtener umbrales aplicables (específicos del aire + globales)
+        umbrales_df = self.obtener_umbrales_configuracion(aire_id=aire_id)
+        
+        if umbrales_df.empty:
+            # Si no hay umbrales configurados, considerar que está dentro de límites
+            return {
+                'dentro_limite': True,
+                'alertas': []
+            }
+        
+        # Lista para almacenar alertas
+        alertas = []
+        
+        # Verificar cada umbral
+        for _, umbral in umbrales_df.iterrows():
+            if not umbral['notificar_activo']:
+                continue
+                
+            # Verificar temperatura
+            if temperatura < umbral['temp_min']:
+                alertas.append({
+                    'tipo': 'temperatura',
+                    'umbral_id': umbral['id'],
+                    'umbral_nombre': umbral['nombre'],
+                    'valor': temperatura,
+                    'limite': umbral['temp_min'],
+                    'mensaje': f"Temperatura ({temperatura}°C) por debajo del mínimo ({umbral['temp_min']}°C)"
+                })
+            elif temperatura > umbral['temp_max']:
+                alertas.append({
+                    'tipo': 'temperatura',
+                    'umbral_id': umbral['id'],
+                    'umbral_nombre': umbral['nombre'],
+                    'valor': temperatura,
+                    'limite': umbral['temp_max'],
+                    'mensaje': f"Temperatura ({temperatura}°C) por encima del máximo ({umbral['temp_max']}°C)"
+                })
+                
+            # Verificar humedad
+            if humedad < umbral['hum_min']:
+                alertas.append({
+                    'tipo': 'humedad',
+                    'umbral_id': umbral['id'],
+                    'umbral_nombre': umbral['nombre'],
+                    'valor': humedad,
+                    'limite': umbral['hum_min'],
+                    'mensaje': f"Humedad ({humedad}%) por debajo del mínimo ({umbral['hum_min']}%)"
+                })
+            elif humedad > umbral['hum_max']:
+                alertas.append({
+                    'tipo': 'humedad',
+                    'umbral_id': umbral['id'],
+                    'umbral_nombre': umbral['nombre'],
+                    'valor': humedad,
+                    'limite': umbral['hum_max'],
+                    'mensaje': f"Humedad ({humedad}%) por encima del máximo ({umbral['hum_max']}%)"
+                })
+        
+        # Devolver resultado
+        return {
+            'dentro_limite': len(alertas) == 0,
+            'alertas': alertas
+        }
     
     def exportar_datos(self, formato='csv'):
         # Asegurar que el directorio exista

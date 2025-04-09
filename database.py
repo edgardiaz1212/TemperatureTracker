@@ -1,6 +1,6 @@
 import os
 import base64
-from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, ForeignKey, Text, LargeBinary
+from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, ForeignKey, Text, LargeBinary, Boolean
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
 from datetime import datetime
@@ -80,6 +80,39 @@ class Mantenimiento(Base):
             # Devolver formato que puede usar HTML para mostrar
             return f"data:{self.imagen_tipo};base64,{b64_data}"
         return None
+
+# Definir el modelo para la configuración de umbrales
+class UmbralConfiguracion(Base):
+    __tablename__ = 'umbrales_configuracion'
+    
+    id = Column(Integer, primary_key=True)
+    aire_id = Column(Integer, ForeignKey('aires_acondicionados.id'), nullable=True)
+    nombre = Column(String(100), nullable=False)
+    es_global = Column(Boolean, default=False)  # True si el umbral aplica a todos los aires
+    
+    # Umbrales de temperatura
+    temp_min = Column(Float, nullable=False)
+    temp_max = Column(Float, nullable=False)
+    
+    # Umbrales de humedad
+    hum_min = Column(Float, nullable=False)
+    hum_max = Column(Float, nullable=False)
+    
+    # Notificaciones
+    notificar_activo = Column(Boolean, default=True)
+    
+    # Fecha de creación y última modificación
+    fecha_creacion = Column(DateTime, nullable=False, default=datetime.now)
+    ultima_modificacion = Column(DateTime, nullable=False, default=datetime.now, onupdate=datetime.now)
+    
+    # Relación con el aire acondicionado (opcional)
+    aire = relationship("AireAcondicionado")
+    
+    def __repr__(self):
+        if self.es_global:
+            return f"<UmbralConfiguracion(id={self.id}, nombre='{self.nombre}', global)>"
+        else:
+            return f"<UmbralConfiguracion(id={self.id}, nombre='{self.nombre}', aire_id={self.aire_id})>"
 
 # Crear todas las tablas en la base de datos
 def init_db():

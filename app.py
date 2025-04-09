@@ -43,6 +43,7 @@ paginas = [
     "Gestión de Aires",
     "Registro de Mantenimientos",
     "Análisis y Estadísticas",
+    "Configuración de Umbrales",
     "Exportar Datos"
 ]
 
@@ -1073,7 +1074,371 @@ def mostrar_analisis_estadisticas():
         else:
             st.info("No hay suficientes datos para mostrar tendencias temporales.")
 
-# Función para la página de exportación de datos
+# Función para la página de configuración de umbrales
+def mostrar_configuracion_umbrales():
+    st.title("Configuración de Umbrales de Temperatura y Humedad")
+    
+    # Obtener datos
+    aires_df = data_manager.obtener_aires()
+    
+    # Crear tabs para organizar las diferentes funcionalidades
+    tab1, tab2 = st.tabs(["Configurar Umbrales", "Administrar Umbrales"])
+    
+    with tab1:
+        st.subheader("Crear Nueva Configuración de Umbrales")
+        
+        with st.form("formulario_umbral", clear_on_submit=True):
+            # Información general
+            nombre = st.text_input("Nombre de la configuración:", 
+                                  placeholder="Ej: Umbrales Estándar Verano")
+            
+            # Tipo de configuración (global o específica)
+            tipo_config = st.radio(
+                "Tipo de Configuración:",
+                options=["Global (aplica a todos los aires)", "Específica (solo para un aire)"],
+                index=0
+            )
+            
+            es_global = tipo_config == "Global (aplica a todos los aires)"
+            
+            # Si es específica, mostrar selector de aire
+            aire_id = None
+            if not es_global:
+                if not aires_df.empty:
+                    aire_options = [(f"{row['nombre']} (ID: {row['id']})", row['id']) for _, row in aires_df.iterrows()]
+                    aire_nombre, aire_id = st.selectbox(
+                        "Seleccionar Aire Acondicionado:",
+                        options=aire_options,
+                        format_func=lambda x: x[0]
+                    )
+                else:
+                    st.warning("No hay aires acondicionados registrados para configurar umbrales específicos.")
+                    st.stop()
+            
+            # Configuración de umbrales
+            st.subheader("Umbrales de Temperatura")
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                temp_min = st.number_input(
+                    "Temperatura Mínima (°C):",
+                    min_value=-10.0,
+                    max_value=40.0,
+                    value=18.0,
+                    step=0.5
+                )
+            
+            with col2:
+                temp_max = st.number_input(
+                    "Temperatura Máxima (°C):",
+                    min_value=0.0,
+                    max_value=50.0,
+                    value=24.0,
+                    step=0.5
+                )
+            
+            st.subheader("Umbrales de Humedad")
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                hum_min = st.number_input(
+                    "Humedad Mínima (%):",
+                    min_value=0.0,
+                    max_value=100.0,
+                    value=30.0,
+                    step=5.0
+                )
+            
+            with col2:
+                hum_max = st.number_input(
+                    "Humedad Máxima (%):",
+                    min_value=0.0,
+                    max_value=100.0,
+                    value=70.0,
+                    step=5.0
+                )
+            
+            # Configuración de notificaciones
+            notificar_activo = st.checkbox("Activar notificaciones para estos umbrales", value=True)
+            
+            # Validaciones básicas
+            if temp_min >= temp_max:
+                st.warning("La temperatura mínima debe ser menor que la máxima.")
+            
+            if hum_min >= hum_max:
+                st.warning("La humedad mínima debe ser menor que la máxima.")
+            
+            # Botón para enviar
+            submit_button = st.form_submit_button("Guardar Configuración", type="primary")
+            
+            if submit_button:
+                if nombre:
+                    if temp_min < temp_max and hum_min < hum_max:
+                        # Crear la configuración
+                        umbral_id = data_manager.crear_umbral_configuracion(
+                            nombre=nombre,
+                            es_global=es_global,
+                            temp_min=temp_min,
+                            temp_max=temp_max,
+                            hum_min=hum_min,
+                            hum_max=hum_max,
+                            aire_id=None if es_global else aire_id,
+                            notificar_activo=notificar_activo
+                        )
+                        
+                        if umbral_id:
+                            st.success(f"Configuración de umbrales creada exitosamente con ID: {umbral_id}")
+                        else:
+                            st.error("No se pudo crear la configuración de umbrales. Verifica los valores.")
+                    else:
+                        st.error("Los valores mínimos deben ser menores que los máximos.")
+                else:
+                    st.error("Por favor, ingresa un nombre para la configuración.")
+    
+    with tab2:
+        st.subheader("Administrar Configuraciones de Umbrales")
+        
+        # Filtros para mostrar configuraciones
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            mostrar_globales = st.checkbox("Mostrar configuraciones globales", value=True)
+        
+        with col2:
+            aire_filtro = None
+            mostrar_especificas = st.checkbox("Mostrar configuraciones específicas", value=True)
+            
+            if mostrar_especificas and not aires_df.empty:
+                aire_filter_options = [("Todos los aires", None)] + [(f"{row['nombre']} (ID: {row['id']})", row['id']) for _, row in aires_df.iterrows()]
+                
+                aire_filtro_nombre, aire_filtro = st.selectbox(
+                    "Filtrar por Aire Acondicionado:",
+                    options=aire_filter_options,
+                    format_func=lambda x: x[0]
+                )
+        
+        # Obtener configuraciones según los filtros
+        if mostrar_globales and not mostrar_especificas:
+            umbrales_df = data_manager.obtener_umbrales_configuracion(solo_globales=True)
+        elif not mostrar_globales and mostrar_especificas:
+            umbrales_df = data_manager.obtener_umbrales_configuracion(aire_id=aire_filtro, solo_globales=False)
+            # Filtrar solo las no globales
+            if not umbrales_df.empty:
+                umbrales_df = umbrales_df[~umbrales_df['es_global']]
+        else:
+            # Mostrar ambas
+            umbrales_df = data_manager.obtener_umbrales_configuracion(aire_id=aire_filtro)
+        
+        # Mostrar tabla de configuraciones
+        if not umbrales_df.empty:
+            # Preparar DataFrame para mostrar
+            umbrales_display = umbrales_df.copy()
+            
+            # Añadir columna descriptiva del tipo
+            umbrales_display['tipo'] = umbrales_display['es_global'].apply(
+                lambda x: "Global" if x else "Específico"
+            )
+            
+            # Formatear fechas
+            if 'fecha_creacion' in umbrales_display.columns:
+                umbrales_display['fecha_creacion'] = pd.to_datetime(umbrales_display['fecha_creacion']).dt.strftime('%Y-%m-%d %H:%M')
+            
+            if 'ultima_modificacion' in umbrales_display.columns:
+                umbrales_display['ultima_modificacion'] = pd.to_datetime(umbrales_display['ultima_modificacion']).dt.strftime('%Y-%m-%d %H:%M')
+            
+            # Seleccionar y renombrar columnas para mostrar
+            cols_display = ['id', 'nombre', 'tipo', 'aire_nombre' if 'aire_nombre' in umbrales_display.columns else 'aire_id',
+                           'temp_min', 'temp_max', 'hum_min', 'hum_max', 'notificar_activo', 'fecha_creacion']
+            
+            # Filtrar solo las columnas que existen
+            cols_display = [col for col in cols_display if col in umbrales_display.columns]
+            
+            # Crear el DataFrame a mostrar
+            umbrales_show = umbrales_display[cols_display].copy()
+            
+            # Renombrar columnas
+            column_rename = {
+                'id': 'ID',
+                'nombre': 'Nombre',
+                'tipo': 'Tipo',
+                'aire_id': 'ID Aire',
+                'aire_nombre': 'Aire',
+                'temp_min': 'Temp. Min (°C)',
+                'temp_max': 'Temp. Max (°C)',
+                'hum_min': 'Hum. Min (%)',
+                'hum_max': 'Hum. Max (%)',
+                'notificar_activo': 'Notificaciones',
+                'fecha_creacion': 'Creación'
+            }
+            
+            # Aplicar solo los renombres para columnas presentes
+            rename_dict = {k: v for k, v in column_rename.items() if k in umbrales_show.columns}
+            umbrales_show.rename(columns=rename_dict, inplace=True)
+            
+            # Mostrar la tabla
+            st.dataframe(umbrales_show, use_container_width=True)
+            
+            # Sección para editar configuraciones
+            st.subheader("Editar Configuración")
+            
+            # Crear opciones con detalles de cada configuración
+            umbral_options = []
+            for _, row in umbrales_df.iterrows():
+                if row['es_global']:
+                    desc = f"ID: {row['id']} - {row['nombre']} (Global)"
+                else:
+                    aire_desc = row.get('aire_nombre', f"Aire ID: {row['aire_id']}")
+                    desc = f"ID: {row['id']} - {row['nombre']} ({aire_desc})"
+                
+                umbral_options.append((desc, row['id']))
+            
+            if umbral_options:
+                umbral_seleccionado_texto, umbral_seleccionado_id = st.selectbox(
+                    "Seleccionar Configuración a Editar:",
+                    options=umbral_options,
+                    format_func=lambda x: x[0]
+                )
+                
+                # Obtener la configuración seleccionada
+                umbral = data_manager.obtener_umbral_por_id(umbral_seleccionado_id)
+                
+                if umbral:
+                    with st.form("formulario_editar_umbral"):
+                        st.subheader(f"Editar: {umbral.nombre}")
+                        
+                        # Campo para editar nombre
+                        nombre_edit = st.text_input("Nombre:", value=umbral.nombre)
+                        
+                        # No se puede cambiar si es global o a qué aire aplica
+                        if umbral.es_global:
+                            st.info("Esta es una configuración global que aplica a todos los aires acondicionados.")
+                        else:
+                            aire_info = aires_df[aires_df['id'] == umbral.aire_id]
+                            if not aire_info.empty:
+                                st.info(f"Esta configuración aplica al aire: {aire_info.iloc[0]['nombre']}")
+                            else:
+                                st.warning(f"Esta configuración aplica a un aire con ID {umbral.aire_id} que ya no existe.")
+                        
+                        # Umbrales de temperatura
+                        st.subheader("Umbrales de Temperatura")
+                        col1, col2 = st.columns(2)
+                        
+                        with col1:
+                            temp_min_edit = st.number_input(
+                                "Temperatura Mínima (°C):",
+                                min_value=-10.0,
+                                max_value=40.0,
+                                value=float(umbral.temp_min),
+                                step=0.5,
+                                key="temp_min_edit"
+                            )
+                        
+                        with col2:
+                            temp_max_edit = st.number_input(
+                                "Temperatura Máxima (°C):",
+                                min_value=0.0,
+                                max_value=50.0,
+                                value=float(umbral.temp_max),
+                                step=0.5,
+                                key="temp_max_edit"
+                            )
+                        
+                        # Umbrales de humedad
+                        st.subheader("Umbrales de Humedad")
+                        col1, col2 = st.columns(2)
+                        
+                        with col1:
+                            hum_min_edit = st.number_input(
+                                "Humedad Mínima (%):",
+                                min_value=0.0,
+                                max_value=100.0,
+                                value=float(umbral.hum_min),
+                                step=5.0,
+                                key="hum_min_edit"
+                            )
+                        
+                        with col2:
+                            hum_max_edit = st.number_input(
+                                "Humedad Máxima (%):",
+                                min_value=0.0,
+                                max_value=100.0,
+                                value=float(umbral.hum_max),
+                                step=5.0,
+                                key="hum_max_edit"
+                            )
+                        
+                        # Configuración de notificaciones
+                        notificar_activo_edit = st.checkbox(
+                            "Activar notificaciones para estos umbrales", 
+                            value=umbral.notificar_activo,
+                            key="notificar_edit"
+                        )
+                        
+                        # Validaciones básicas
+                        if temp_min_edit >= temp_max_edit:
+                            st.warning("La temperatura mínima debe ser menor que la máxima.")
+                        
+                        if hum_min_edit >= hum_max_edit:
+                            st.warning("La humedad mínima debe ser menor que la máxima.")
+                        
+                        # Botón para actualizar
+                        submit_edit_button = st.form_submit_button("Actualizar Configuración", type="primary")
+                        
+                        if submit_edit_button:
+                            if nombre_edit:
+                                if temp_min_edit < temp_max_edit and hum_min_edit < hum_max_edit:
+                                    # Actualizar la configuración
+                                    actualizado = data_manager.actualizar_umbral_configuracion(
+                                        umbral_id=umbral_seleccionado_id,
+                                        nombre=nombre_edit,
+                                        temp_min=temp_min_edit,
+                                        temp_max=temp_max_edit,
+                                        hum_min=hum_min_edit,
+                                        hum_max=hum_max_edit,
+                                        notificar_activo=notificar_activo_edit
+                                    )
+                                    
+                                    if actualizado:
+                                        st.success("Configuración actualizada exitosamente")
+                                        st.rerun()
+                                    else:
+                                        st.error("No se pudo actualizar la configuración. Verifica los valores.")
+                                else:
+                                    st.error("Los valores mínimos deben ser menores que los máximos.")
+                            else:
+                                st.error("Por favor, ingresa un nombre para la configuración.")
+                else:
+                    st.error("No se pudo encontrar la configuración seleccionada.")
+                    
+                # Sección para eliminar configuración
+                st.subheader("Eliminar Configuración")
+                
+                if st.button("Eliminar Configuración Seleccionada", type="primary"):
+                    confirmacion = st.warning(f"¿Estás seguro de eliminar esta configuración? Esta acción no se puede deshacer.")
+                    
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        if st.button("Sí, eliminar", key="confirmar_eliminar_umbral"):
+                            eliminado = data_manager.eliminar_umbral_configuracion(umbral_seleccionado_id)
+                            if eliminado:
+                                st.success("Configuración eliminada exitosamente")
+                            else:
+                                st.error("No se pudo eliminar la configuración")
+                            st.rerun()
+                    
+                    with col2:
+                        if st.button("Cancelar", key="cancelar_eliminar_umbral"):
+                            st.rerun()
+            else:
+                st.info("No hay configuraciones para editar.")
+        else:
+            st.info("No hay configuraciones de umbrales registradas que cumplan con los filtros seleccionados.")
+            
+        # Botón para actualizar vista
+        if st.button("Actualizar Lista"):
+            st.rerun()
+
 def mostrar_exportar_datos():
     st.title("Exportar Datos")
     
@@ -1181,5 +1546,7 @@ elif pagina_seleccionada == "Registro de Mantenimientos":
     mostrar_registro_mantenimientos()
 elif pagina_seleccionada == "Análisis y Estadísticas":
     mostrar_analisis_estadisticas()
+elif pagina_seleccionada == "Configuración de Umbrales":
+    mostrar_configuracion_umbrales()
 elif pagina_seleccionada == "Exportar Datos":
     mostrar_exportar_datos()
