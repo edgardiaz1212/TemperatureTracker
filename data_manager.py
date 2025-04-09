@@ -1,8 +1,9 @@
 import pandas as pd
 import os
 import numpy as np
+import io
 from datetime import datetime
-from database import session, AireAcondicionado, Lectura, init_db
+from database import session, AireAcondicionado, Lectura, Mantenimiento, init_db
 from sqlalchemy import func, distinct
 
 class DataManager:
@@ -247,6 +248,112 @@ class DataManager:
             session.delete(aire)
             session.commit()
     
+    def agregar_mantenimiento(self, aire_id, tipo_mantenimiento, descripcion, tecnico, imagen_file=None):
+        """
+        Agrega un nuevo registro de mantenimiento a la base de datos.
+        
+        Args:
+            aire_id: ID del aire acondicionado
+            tipo_mantenimiento: Tipo de mantenimiento realizado
+            descripcion: Descripción detallada del mantenimiento
+            tecnico: Nombre del técnico que realizó el mantenimiento
+            imagen_file: Archivo de imagen subido (bytes y metadatos)
+            
+        Returns:
+            ID del nuevo mantenimiento registrado
+        """
+        # Crear nuevo registro de mantenimiento
+        nuevo_mantenimiento = Mantenimiento(
+            aire_id=aire_id,
+            fecha=datetime.now(),
+            tipo_mantenimiento=tipo_mantenimiento,
+            descripcion=descripcion,
+            tecnico=tecnico
+        )
+        
+        # Si se cargó una imagen, guardarla en la base de datos
+        if imagen_file is not None:
+            # Obtener bytes de la imagen
+            imagen_bytes = imagen_file.read()
+            
+            # Guardar datos de la imagen
+            nuevo_mantenimiento.imagen_nombre = imagen_file.name
+            nuevo_mantenimiento.imagen_tipo = imagen_file.type
+            nuevo_mantenimiento.imagen_datos = imagen_bytes
+        
+        # Guardar en la base de datos
+        session.add(nuevo_mantenimiento)
+        session.commit()
+        
+        return nuevo_mantenimiento.id
+    
+    def obtener_mantenimientos(self, aire_id=None):
+        """
+        Obtiene todos los mantenimientos, opcionalmente filtrados por aire_id.
+        
+        Args:
+            aire_id: Opcional, ID del aire acondicionado para filtrar
+            
+        Returns:
+            DataFrame con los mantenimientos
+        """
+        # Construir la consulta
+        query = session.query(Mantenimiento)
+        
+        # Filtrar por aire_id si se proporciona
+        if aire_id is not None:
+            query = query.filter(Mantenimiento.aire_id == aire_id)
+        
+        # Ordenar por fecha (más recientes primero)
+        mantenimientos = query.order_by(Mantenimiento.fecha.desc()).all()
+        
+        # Convertir a DataFrame
+        mantenimientos_data = [
+            {
+                'id': mant.id,
+                'aire_id': mant.aire_id,
+                'fecha': mant.fecha,
+                'tipo_mantenimiento': mant.tipo_mantenimiento,
+                'descripcion': mant.descripcion,
+                'tecnico': mant.tecnico,
+                'tiene_imagen': mant.imagen_datos is not None
+            }
+            for mant in mantenimientos
+        ]
+        
+        return pd.DataFrame(mantenimientos_data)
+    
+    def obtener_mantenimiento_por_id(self, mantenimiento_id):
+        """
+        Obtiene un mantenimiento específico por su ID.
+        
+        Args:
+            mantenimiento_id: ID del mantenimiento a obtener
+            
+        Returns:
+            Objeto Mantenimiento o None si no existe
+        """
+        return session.query(Mantenimiento).filter(Mantenimiento.id == mantenimiento_id).first()
+    
+    def eliminar_mantenimiento(self, mantenimiento_id):
+        """
+        Elimina un mantenimiento por su ID.
+        
+        Args:
+            mantenimiento_id: ID del mantenimiento a eliminar
+            
+        Returns:
+            True si se eliminó correctamente, False en caso contrario
+        """
+        mantenimiento = session.query(Mantenimiento).filter(Mantenimiento.id == mantenimiento_id).first()
+        
+        if mantenimiento:
+            session.delete(mantenimiento)
+            session.commit()
+            return True
+        
+        return False
+    
     def exportar_datos(self, formato='csv'):
         # Asegurar que el directorio exista
         if not os.path.exists(self.data_dir):
@@ -255,17 +362,28 @@ class DataManager:
         # Obtener datos de la base de datos
         aires_df = self.obtener_aires()
         lecturas_df = self.obtener_lecturas()
+        mantenimientos_df = self.obtener_mantenimientos()
+        
+        # Eliminar columna de imagen binaria para exportación
+        if not mantenimientos_df.empty:
+            mantenimientos_export_df = mantenimientos_df.copy()
+        else:
+            mantenimientos_export_df = pd.DataFrame()
         
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         
         if formato == 'csv':
             aires_export = os.path.join(self.data_dir, f'aires_export_{timestamp}.csv')
             lecturas_export = os.path.join(self.data_dir, f'lecturas_export_{timestamp}.csv')
+            mantenimientos_export = os.path.join(self.data_dir, f'mantenimientos_export_{timestamp}.csv')
             
             aires_df.to_csv(aires_export, index=False)
             lecturas_df.to_csv(lecturas_export, index=False)
             
-            return aires_export, lecturas_export
+            if not mantenimientos_export_df.empty:
+                mantenimientos_export_df.to_csv(mantenimientos_export, index=False)
+            
+            return aires_export, lecturas_export, mantenimientos_export
         
         elif formato == 'excel':
             export_file = os.path.join(self.data_dir, f'export_{timestamp}.xlsx')
@@ -273,6 +391,9 @@ class DataManager:
             with pd.ExcelWriter(export_file) as writer:
                 aires_df.to_excel(writer, sheet_name='Aires', index=False)
                 lecturas_df.to_excel(writer, sheet_name='Lecturas', index=False)
+                
+                if not mantenimientos_export_df.empty:
+                    mantenimientos_export_df.to_excel(writer, sheet_name='Mantenimientos', index=False)
             
             return export_file
         

@@ -41,6 +41,7 @@ paginas = [
     "Dashboard",
     "Registro de Lecturas",
     "Gestión de Aires",
+    "Registro de Mantenimientos",
     "Análisis y Estadísticas",
     "Exportar Datos"
 ]
@@ -327,6 +328,191 @@ def mostrar_gestion_aires():
                         st.rerun()
     else:
         st.info("No hay aires acondicionados registrados aún.")
+
+# Función para la página de registro de mantenimientos
+def mostrar_registro_mantenimientos():
+    st.title("Registro de Mantenimientos")
+    
+    # Obtener lista de aires acondicionados
+    aires_df = data_manager.obtener_aires()
+    
+    if aires_df.empty:
+        st.warning("No hay aires acondicionados registrados. Por favor, agrega un aire primero.")
+        return
+    
+    # Dividir en pestañas
+    tab1, tab2 = st.tabs(["Registrar Mantenimiento", "Ver Mantenimientos"])
+    
+    with tab1:
+        # Formulario para agregar mantenimiento
+        st.subheader("Nuevo Registro de Mantenimiento")
+        
+        with st.form("formulario_mantenimiento", clear_on_submit=True):
+            # Seleccionar aire acondicionado
+            aire_options = [(f"{row['nombre']} (ID: {row['id']})", row['id']) for _, row in aires_df.iterrows()]
+            aire_nombre, aire_id = st.selectbox(
+                "Seleccionar Aire Acondicionado:",
+                options=aire_options,
+                format_func=lambda x: x[0]
+            )
+            
+            # Tipo de mantenimiento
+            tipos_mantenimiento = [
+                "Preventivo programado",
+                "Correctivo",
+                "Limpieza de filtros",
+                "Recarga de refrigerante",
+                "Revisión eléctrica",
+                "Cambio de partes",
+                "Otro"
+            ]
+            
+            tipo_mantenimiento = st.selectbox(
+                "Tipo de Mantenimiento:",
+                options=tipos_mantenimiento
+            )
+            
+            # Descripción del mantenimiento
+            descripcion = st.text_area(
+                "Descripción detallada:",
+                placeholder="Describe el mantenimiento realizado, piezas cambiadas, observaciones, etc."
+            )
+            
+            # Nombre del técnico
+            tecnico = st.text_input(
+                "Nombre del Técnico:",
+                placeholder="Nombre y apellido del técnico que realizó el mantenimiento"
+            )
+            
+            # Subir imagen o documento
+            imagen_file = st.file_uploader(
+                "Adjuntar imagen o documento (opcional):",
+                type=["jpg", "jpeg", "png", "pdf"]
+            )
+            
+            # Botón para enviar
+            submitted = st.form_submit_button("Registrar Mantenimiento")
+            
+            if submitted:
+                if tipo_mantenimiento and descripcion and tecnico:
+                    # Agregar mantenimiento
+                    try:
+                        mantenimiento_id = data_manager.agregar_mantenimiento(
+                            aire_id,
+                            tipo_mantenimiento,
+                            descripcion,
+                            tecnico,
+                            imagen_file
+                        )
+                        
+                        st.success(f"Mantenimiento registrado exitosamente con ID: {mantenimiento_id}")
+                    except Exception as e:
+                        st.error(f"Error al registrar el mantenimiento: {str(e)}")
+                else:
+                    st.error("Por favor, completa todos los campos obligatorios.")
+    
+    with tab2:
+        st.subheader("Historial de Mantenimientos")
+        
+        # Filtro por aire
+        col1, col2 = st.columns([3, 1])
+        
+        with col1:
+            aire_filter_options = [("Todos los aires", None)] + [(f"{row['nombre']} (ID: {row['id']})", row['id']) for _, row in aires_df.iterrows()]
+            
+            aire_filter_nombre, aire_filter_id = st.selectbox(
+                "Filtrar por Aire:",
+                options=aire_filter_options,
+                format_func=lambda x: x[0]
+            )
+        
+        with col2:
+            if st.button("Aplicar Filtro", use_container_width=True):
+                st.rerun()
+        
+        # Obtener mantenimientos
+        mantenimientos_df = data_manager.obtener_mantenimientos(aire_id=aire_filter_id)
+        
+        if not mantenimientos_df.empty:
+            # Añadir información del nombre del aire
+            mantenimientos_con_info = mantenimientos_df.merge(
+                aires_df[['id', 'nombre']],
+                left_on='aire_id',
+                right_on='id',
+                suffixes=('', '_aire')
+            )
+            
+            # Formatear la fecha
+            mantenimientos_con_info['fecha'] = pd.to_datetime(mantenimientos_con_info['fecha']).dt.strftime('%Y-%m-%d %H:%M')
+            
+            # Seleccionar y renombrar columnas para mostrar
+            mantenimientos_display = mantenimientos_con_info[[
+                'id', 'nombre', 'fecha', 'tipo_mantenimiento', 'tecnico', 'tiene_imagen'
+            ]].copy()
+            
+            mantenimientos_display.columns = [
+                'ID', 'Aire', 'Fecha', 'Tipo', 'Técnico', 'Tiene Imagen'
+            ]
+            
+            # Mostrar tabla con mantenimientos
+            st.dataframe(mantenimientos_display, use_container_width=True)
+            
+            # Sección para ver detalles de un mantenimiento
+            st.subheader("Detalles de Mantenimiento")
+            
+            mantenimiento_options = [(f"ID: {row['id']} - {row['Tipo']} ({row['Fecha']})", row['id']) for _, row in mantenimientos_display.iterrows()]
+            
+            if mantenimiento_options:
+                mantenimiento_seleccionado_texto, mantenimiento_seleccionado_id = st.selectbox(
+                    "Seleccionar Mantenimiento para ver detalles:",
+                    options=mantenimiento_options,
+                    format_func=lambda x: x[0]
+                )
+                
+                # Obtener detalles del mantenimiento seleccionado
+                mantenimiento = data_manager.obtener_mantenimiento_por_id(mantenimiento_seleccionado_id)
+                
+                if mantenimiento:
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        st.write(f"**Aire:** {aires_df[aires_df['id'] == mantenimiento.aire_id]['nombre'].values[0]}")
+                        st.write(f"**Fecha:** {mantenimiento.fecha.strftime('%Y-%m-%d %H:%M')}")
+                        st.write(f"**Tipo:** {mantenimiento.tipo_mantenimiento}")
+                        st.write(f"**Técnico:** {mantenimiento.tecnico}")
+                    
+                    st.write("**Descripción:**")
+                    st.write(mantenimiento.descripcion)
+                    
+                    # Mostrar imagen si existe
+                    if mantenimiento.imagen_datos:
+                        st.write("**Imagen adjunta:**")
+                        imagen_b64 = mantenimiento.get_imagen_base64()
+                        if imagen_b64:
+                            st.image(imagen_b64, caption=mantenimiento.imagen_nombre)
+                    
+                    # Botón para eliminar mantenimiento
+                    if st.button("Eliminar este mantenimiento", type="primary"):
+                        confirmacion = st.warning(f"¿Estás seguro de eliminar este registro de mantenimiento? Esta acción no se puede deshacer.")
+                        
+                        col1, col2 = st.columns(2)
+                        
+                        with col1:
+                            if st.button("Sí, eliminar", key="confirmar_eliminar_mant"):
+                                eliminado = data_manager.eliminar_mantenimiento(mantenimiento_seleccionado_id)
+                                if eliminado:
+                                    st.success("Mantenimiento eliminado exitosamente")
+                                else:
+                                    st.error("No se pudo eliminar el mantenimiento")
+                                st.rerun()
+                        
+                        with col2:
+                            if st.button("Cancelar", key="cancelar_eliminar_mant"):
+                                st.rerun()
+            else:
+                st.info("No hay mantenimientos para seleccionar")
+        else:
+            st.info("No hay mantenimientos registrados aún.")
 
 # Función para la página de análisis y estadísticas
 def mostrar_analisis_estadisticas():
@@ -686,6 +872,8 @@ elif pagina_seleccionada == "Registro de Lecturas":
     mostrar_registro_lecturas()
 elif pagina_seleccionada == "Gestión de Aires":
     mostrar_gestion_aires()
+elif pagina_seleccionada == "Registro de Mantenimientos":
+    mostrar_registro_mantenimientos()
 elif pagina_seleccionada == "Análisis y Estadísticas":
     mostrar_analisis_estadisticas()
 elif pagina_seleccionada == "Exportar Datos":
