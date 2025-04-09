@@ -152,167 +152,321 @@ def mostrar_registro_lecturas():
         st.warning("No hay aires acondicionados registrados. Por favor, agrega un aire primero.")
         return
     
-    # Formulario para agregar lectura
-    with st.form("formulario_lectura"):
+    # Crear tabs para organizar las diferentes funcionalidades
+    tab1, tab2 = st.tabs(["Registrar Lecturas", "Administrar Lecturas"])
+    
+    with tab1:
+        # Formulario para agregar lectura
         st.subheader("Nueva Lectura")
         
-        # Seleccionar aire acondicionado
-        aire_options = [(f"{row['nombre']} (ID: {row['id']})", row['id']) for _, row in aires_df.iterrows()]
-        aire_nombre, aire_id = st.selectbox(
-            "Seleccionar Aire Acondicionado:",
-            options=aire_options,
-            format_func=lambda x: x[0]
-        )
+        with st.form("formulario_lectura", clear_on_submit=True):
+            # Seleccionar aire acondicionado
+            aire_options = [(f"{row['nombre']} (ID: {row['id']})", row['id']) for _, row in aires_df.iterrows()]
+            aire_nombre, aire_id = st.selectbox(
+                "Seleccionar Aire Acondicionado:",
+                options=aire_options,
+                format_func=lambda x: x[0]
+            )
+            
+            # Fecha de la lectura
+            fecha = st.date_input("Fecha de la lectura:", datetime.now())
+            
+            # Horarios predefinidos
+            horas_predefinidas = {
+                "2:00 AM": "02:00:00",
+                "6:00 AM": "06:00:00",
+                "9:00 AM": "09:00:00",
+                "12:00 PM": "12:00:00",
+                "3:00 PM": "15:00:00",
+                "6:00 PM": "18:00:00",
+                "10:00 PM": "22:00:00"
+            }
+            
+            # Selección de hora
+            hora_seleccionada = st.selectbox(
+                "Hora de la lectura:",
+                options=list(horas_predefinidas.keys())
+            )
+            
+            # Valores de temperatura y humedad
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                temperatura = st.number_input(
+                    "Temperatura (°C):",
+                    min_value=-10.0,
+                    max_value=50.0,
+                    value=25.0,
+                    step=0.1
+                )
+            
+            with col2:
+                humedad = st.number_input(
+                    "Humedad (%):",
+                    min_value=0.0,
+                    max_value=100.0,
+                    value=50.0,
+                    step=0.1
+                )
+            
+            # Botón para enviar
+            submitted = st.form_submit_button("Registrar Lectura", type="primary")
+            
+            if submitted:
+                # Obtener la hora seleccionada
+                hora_str = horas_predefinidas[hora_seleccionada]
+                
+                # Combinar fecha y hora para crear el datetime
+                fecha_hora_str = f"{fecha.strftime('%Y-%m-%d')} {hora_str}"
+                fecha_dt = pd.to_datetime(fecha_hora_str)
+                
+                # Agregar lectura
+                lectura_id = data_manager.agregar_lectura(
+                    aire_id,
+                    fecha_dt,
+                    temperatura,
+                    humedad
+                )
+                
+                st.success(f"Lectura registrada exitosamente con ID: {lectura_id}")
         
-        # Fecha de la lectura
-        fecha = st.date_input("Fecha de la lectura:", datetime.now())
+        # Mostrar últimas lecturas
+        st.subheader("Últimas Lecturas Registradas")
         
-        # Horarios predefinidos
-        horas_predefinidas = {
-            "2:00 AM": "02:00:00",
-            "6:00 AM": "06:00:00",
-            "9:00 AM": "09:00:00",
-            "12:00 PM": "12:00:00",
-            "3:00 PM": "15:00:00",
-            "6:00 PM": "18:00:00",
-            "10:00 PM": "22:00:00"
-        }
+        lecturas_df = data_manager.obtener_lecturas()
         
-        # Selección de hora
-        hora_seleccionada = st.selectbox(
-            "Hora de la lectura:",
-            options=list(horas_predefinidas.keys())
-        )
+        if not lecturas_df.empty:
+            # Ordenar por fecha (más recientes primero)
+            lecturas_df = lecturas_df.sort_values(by='fecha', ascending=False)
+            
+            # Añadir información del nombre del aire
+            lecturas_con_info = lecturas_df.merge(
+                aires_df[['id', 'nombre']],
+                left_on='aire_id',
+                right_on='id',
+                suffixes=('', '_aire')
+            )
+            
+            # Seleccionar y renombrar columnas para mostrar
+            lecturas_display = lecturas_con_info[['id', 'nombre', 'fecha', 'temperatura', 'humedad']].copy()
+            
+            # Formatear la fecha para incluir fecha y hora
+            lecturas_display['fecha'] = lecturas_display['fecha'].dt.strftime('%Y-%m-%d %H:%M')
+            
+            lecturas_display.columns = ['ID Lectura', 'Aire', 'Fecha y Hora', 'Temperatura (°C)', 'Humedad (%)']
+            
+            # Mostrar tabla con las últimas 10 lecturas
+            st.dataframe(lecturas_display.head(10), use_container_width=True)
+        else:
+            st.info("No hay lecturas registradas aún.")
+    
+    with tab2:
+        st.subheader("Administrar Lecturas Existentes")
         
-        # Valores de temperatura y humedad
-        col1, col2 = st.columns(2)
+        # Filtro por aire acondicionado
+        aire_filter_options = [("Todos los aires", None)] + [(f"{row['nombre']} (ID: {row['id']})", row['id']) for _, row in aires_df.iterrows()]
+        col1, col2 = st.columns([3, 1])
         
         with col1:
-            temperatura = st.number_input(
-                "Temperatura (°C):",
-                min_value=-10.0,
-                max_value=50.0,
-                value=25.0,
-                step=0.1
+            aire_filter_nombre, aire_filter_id = st.selectbox(
+                "Filtrar por Aire Acondicionado:",
+                options=aire_filter_options,
+                format_func=lambda x: x[0],
+                key="filtro_lecturas"
             )
         
         with col2:
-            humedad = st.number_input(
-                "Humedad (%):",
-                min_value=0.0,
-                max_value=100.0,
-                value=50.0,
-                step=0.1
-            )
+            if st.button("Aplicar Filtro", use_container_width=True):
+                st.rerun()
+                
+        # Mostrar lecturas según el filtro
+        lecturas_df = data_manager.obtener_lecturas()
         
-        # Botón para enviar
-        submitted = st.form_submit_button("Registrar Lectura")
-        
-        if submitted:
-            # Obtener la hora seleccionada
-            hora_str = horas_predefinidas[hora_seleccionada]
+        if not lecturas_df.empty:
+            # Filtrar por aire_id si se seleccionó uno
+            if aire_filter_id is not None:
+                lecturas_df = lecturas_df[lecturas_df['aire_id'] == aire_filter_id]
             
-            # Combinar fecha y hora para crear el datetime
-            fecha_hora_str = f"{fecha.strftime('%Y-%m-%d')} {hora_str}"
-            fecha_dt = pd.to_datetime(fecha_hora_str)
+            # Ordenar por fecha (más recientes primero)
+            lecturas_df = lecturas_df.sort_values(by='fecha', ascending=False)
             
-            # Agregar lectura
-            lectura_id = data_manager.agregar_lectura(
-                aire_id,
-                fecha_dt,
-                temperatura,
-                humedad
+            # Añadir información del nombre del aire
+            lecturas_con_info = lecturas_df.merge(
+                aires_df[['id', 'nombre']],
+                left_on='aire_id',
+                right_on='id',
+                suffixes=('', '_aire')
             )
             
-            st.success(f"Lectura registrada exitosamente con ID: {lectura_id}")
-    
-    # Mostrar últimas lecturas
-    st.subheader("Últimas Lecturas Registradas")
-    
-    lecturas_df = data_manager.obtener_lecturas()
-    
-    if not lecturas_df.empty:
-        # Ordenar por fecha (más recientes primero)
-        lecturas_df = lecturas_df.sort_values(by='fecha', ascending=False)
-        
-        # Añadir información del nombre del aire
-        lecturas_con_info = lecturas_df.merge(
-            aires_df[['id', 'nombre']],
-            left_on='aire_id',
-            right_on='id',
-            suffixes=('', '_aire')
-        )
-        
-        # Seleccionar y renombrar columnas para mostrar
-        lecturas_display = lecturas_con_info[['id', 'nombre', 'fecha', 'temperatura', 'humedad']].copy()
-        
-        # Formatear la fecha para incluir fecha y hora
-        lecturas_display['fecha'] = lecturas_display['fecha'].dt.strftime('%Y-%m-%d %H:%M')
-        
-        lecturas_display.columns = ['ID Lectura', 'Aire', 'Fecha y Hora', 'Temperatura (°C)', 'Humedad (%)']
-        
-        # Mostrar tabla con las últimas 10 lecturas
-        st.dataframe(lecturas_display.head(10), use_container_width=True)
-    else:
-        st.info("No hay lecturas registradas aún.")
+            # Seleccionar y renombrar columnas para mostrar
+            lecturas_display = lecturas_con_info[['id', 'nombre', 'fecha', 'temperatura', 'humedad']].copy()
+            
+            # Formatear la fecha para incluir fecha y hora
+            lecturas_display['fecha'] = lecturas_display['fecha'].dt.strftime('%Y-%m-%d %H:%M')
+            
+            lecturas_display.columns = ['ID Lectura', 'Aire', 'Fecha y Hora', 'Temperatura (°C)', 'Humedad (%)']
+            
+            if not lecturas_display.empty:
+                # Mostrar todas las lecturas que cumplen con el filtro
+                st.dataframe(lecturas_display, use_container_width=True)
+                
+                # Sección para eliminar lecturas
+                st.subheader("Eliminar Lectura")
+                
+                # Crear opciones con detalles de cada lectura
+                lectura_options = [(f"ID: {row['ID Lectura']} - {row['Aire']} ({row['Fecha y Hora']}): {row['Temperatura (°C)']}°C, {row['Humedad (%)']}%", 
+                                 row['ID Lectura']) for _, row in lecturas_display.iterrows()]
+                
+                if lectura_options:
+                    lectura_seleccionada_texto, lectura_seleccionada_id = st.selectbox(
+                        "Seleccionar Lectura para eliminar:",
+                        options=lectura_options,
+                        format_func=lambda x: x[0]
+                    )
+                    
+                    if st.button("Eliminar Lectura Seleccionada", type="primary"):
+                        confirmacion = st.warning(f"¿Estás seguro de eliminar esta lectura? Esta acción no se puede deshacer.")
+                        
+                        col1, col2 = st.columns(2)
+                        
+                        with col1:
+                            if st.button("Sí, eliminar", key="confirmar_eliminar_lectura"):
+                                eliminado = data_manager.eliminar_lectura(lectura_seleccionada_id)
+                                if eliminado:
+                                    st.success("Lectura eliminada exitosamente")
+                                else:
+                                    st.error("No se pudo eliminar la lectura")
+                                st.rerun()
+                        
+                        with col2:
+                            if st.button("Cancelar", key="cancelar_eliminar_lectura"):
+                                st.rerun()
+                else:
+                    st.info("No hay lecturas para seleccionar")
+            else:
+                st.info(f"No hay lecturas registradas para el filtro seleccionado.")
+        else:
+            st.info("No hay lecturas registradas aún.")
 
 # Función para la página de gestión de aires
 def mostrar_gestion_aires():
     st.title("Gestión de Aires Acondicionados")
     
-    # Formulario para agregar nuevo aire
-    with st.form("formulario_aire"):
+    # Tabs para organizar las diferentes funcionalidades
+    tab1, tab2, tab3 = st.tabs(["Registrar Aires", "Editar Aires", "Eliminar Aires"])
+    
+    with tab1:
+        # Formulario para agregar nuevo aire
         st.subheader("Agregar Nuevo Aire Acondicionado")
         
-        nombre = st.text_input("Nombre:", placeholder="Ej: Aire Oficina Principal")
-        ubicacion = st.text_input("Ubicación:", placeholder="Ej: Planta 1, Sala 3")
-        fecha_instalacion = st.date_input("Fecha de instalación:", datetime.now())
-        
-        # Botón para enviar
-        submitted = st.form_submit_button("Agregar Aire")
-        
-        if submitted:
-            if nombre and ubicacion:
-                # Convertir fecha a string
-                fecha_str = fecha_instalacion.strftime('%Y-%m-%d')
-                
-                # Agregar aire
-                aire_id = data_manager.agregar_aire(
-                    nombre,
-                    ubicacion,
-                    fecha_str
-                )
-                
-                st.success(f"Aire acondicionado agregado exitosamente con ID: {aire_id}")
-            else:
-                st.error("Por favor, completa todos los campos.")
+        with st.form("formulario_aire", clear_on_submit=True):
+            nombre = st.text_input("Nombre:", placeholder="Ej: Aire Oficina Principal")
+            ubicacion = st.text_input("Ubicación:", placeholder="Ej: Planta 1, Sala 3")
+            fecha_instalacion = st.date_input("Fecha de instalación:", datetime.now())
+            
+            # Botón para enviar
+            submitted = st.form_submit_button("Agregar Aire", type="primary")
+            
+            if submitted:
+                if nombre and ubicacion:
+                    # Convertir fecha a string
+                    fecha_str = fecha_instalacion.strftime('%Y-%m-%d')
+                    
+                    # Agregar aire
+                    aire_id = data_manager.agregar_aire(
+                        nombre,
+                        ubicacion,
+                        fecha_str
+                    )
+                    
+                    st.success(f"Aire acondicionado agregado exitosamente con ID: {aire_id}")
+                else:
+                    st.error("Por favor, completa todos los campos.")
     
-    # Mostrar aires registrados
-    st.subheader("Aires Acondicionados Registrados")
-    
+    # Obtener aires registrados
     aires_df = data_manager.obtener_aires()
     
     if not aires_df.empty:
-        # Mostrar tabla con los aires
-        st.dataframe(aires_df, use_container_width=True)
+        with tab1:
+            # Mostrar aires registrados
+            st.subheader("Aires Acondicionados Registrados")
+            # Mostrar tabla con los aires
+            st.dataframe(aires_df, use_container_width=True)
+            
+        with tab2:
+            # Sección para editar aires acondicionados
+            st.subheader("Editar Aire Acondicionado")
+            
+            # Crear opciones para selectbox con nombres e IDs
+            aire_options = [(f"{row['nombre']} (ID: {row['id']})", row['id']) for _, row in aires_df.iterrows()]
+            
+            aire_seleccionado_nombre, aire_seleccionado_id = st.selectbox(
+                "Seleccionar Aire Acondicionado a Editar:",
+                options=aire_options,
+                format_func=lambda x: x[0],
+                key="editar_aire_select"
+            )
+            
+            # Obtener datos actuales del aire seleccionado
+            aire_actual = aires_df[aires_df['id'] == aire_seleccionado_id].iloc[0]
+            
+            with st.form("formulario_editar_aire"):
+                nombre_edit = st.text_input("Nombre del Aire Acondicionado", 
+                                           value=aire_actual['nombre'])
+                ubicacion_edit = st.text_input("Ubicación", 
+                                              value=aire_actual['ubicacion'])
+                
+                # Convertir la fecha de texto a objeto date si es necesario
+                fecha_actual = aire_actual['fecha_instalacion']
+                if isinstance(fecha_actual, str):
+                    try:
+                        fecha_obj = datetime.strptime(fecha_actual, "%Y-%m-%d").date()
+                    except:
+                        fecha_obj = datetime.now().date()
+                else:
+                    fecha_obj = datetime.now().date()
+                
+                fecha_instalacion_edit = st.date_input("Fecha de Instalación", 
+                                                     value=fecha_obj)
+                
+                submit_edit_button = st.form_submit_button("Actualizar Aire Acondicionado", type="primary")
+                
+                if submit_edit_button:
+                    if nombre_edit and ubicacion_edit:
+                        # Formatear fecha
+                        fecha_formateada = fecha_instalacion_edit.strftime("%Y-%m-%d")
+                        
+                        # Actualizar aire en la base de datos
+                        actualizado = data_manager.actualizar_aire(
+                            aire_seleccionado_id, 
+                            nombre_edit, 
+                            ubicacion_edit, 
+                            fecha_formateada
+                        )
+                        
+                        if actualizado:
+                            st.success(f"Aire acondicionado actualizado exitosamente")
+                            st.rerun()
+                        else:
+                            st.error("Error al actualizar el aire acondicionado")
+                    else:
+                        st.warning("Debes completar el nombre y la ubicación del aire acondicionado")
         
-        # Sección para eliminar aire
-        st.subheader("Eliminar Aire Acondicionado")
-        
-        aire_options = [(f"{row['nombre']} (ID: {row['id']})", row['id']) for _, row in aires_df.iterrows()]
-        
-        col1, col2 = st.columns([3, 1])
-        
-        with col1:
+        with tab3:
+            # Sección para eliminar aires acondicionados
+            st.subheader("Eliminar Aire Acondicionado")
+            
+            # Crear opciones para selectbox con nombres e IDs
+            aire_options = [(f"{row['nombre']} (ID: {row['id']})", row['id']) for _, row in aires_df.iterrows()]
+            
             aire_a_eliminar_nombre, aire_a_eliminar_id = st.selectbox(
                 "Seleccionar Aire para eliminar:",
                 options=aire_options,
-                format_func=lambda x: x[0]
+                format_func=lambda x: x[0],
+                key="eliminar_aire_select"
             )
-        
-        with col2:
-            if st.button("Eliminar Aire", type="primary", use_container_width=True):
-                # Confirmar eliminación
+            
+            if st.button("Eliminar Aire Seleccionado", type="primary"):
                 confirmacion = st.warning(f"¿Estás seguro de eliminar '{aire_a_eliminar_nombre}'? Esta acción eliminará también todas sus lecturas asociadas.")
                 
                 col1, col2 = st.columns(2)
@@ -327,7 +481,12 @@ def mostrar_gestion_aires():
                     if st.button("Cancelar", key="cancelar_eliminar"):
                         st.rerun()
     else:
-        st.info("No hay aires acondicionados registrados aún.")
+        with tab1:
+            st.info("No hay aires acondicionados registrados aún.")
+        with tab2:
+            st.info("No hay aires acondicionados para editar.")
+        with tab3:
+            st.info("No hay aires acondicionados para eliminar.")
 
 # Función para la página de registro de mantenimientos
 def mostrar_registro_mantenimientos():
@@ -460,7 +619,7 @@ def mostrar_registro_mantenimientos():
             # Sección para ver detalles de un mantenimiento
             st.subheader("Detalles de Mantenimiento")
             
-            mantenimiento_options = [(f"ID: {row['id']} - {row['Tipo']} ({row['Fecha']})", row['id']) for _, row in mantenimientos_display.iterrows()]
+            mantenimiento_options = [(f"ID: {row['ID']} - {row['Tipo']} ({row['Fecha']})", row['ID']) for _, row in mantenimientos_display.iterrows()]
             
             if mantenimiento_options:
                 mantenimiento_seleccionado_texto, mantenimiento_seleccionado_id = st.selectbox(

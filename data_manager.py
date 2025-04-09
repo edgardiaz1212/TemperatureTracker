@@ -117,6 +117,31 @@ class DataManager:
         session.commit()
         
         return nuevo_aire.id
+        
+    def actualizar_aire(self, aire_id, nombre, ubicacion, fecha_instalacion):
+        """
+        Actualiza la información de un aire acondicionado.
+        
+        Args:
+            aire_id: ID del aire acondicionado a actualizar
+            nombre: Nuevo nombre
+            ubicacion: Nueva ubicación
+            fecha_instalacion: Nueva fecha de instalación
+            
+        Returns:
+            True si se actualizó correctamente, False en caso contrario
+        """
+        aire = session.query(AireAcondicionado).filter(AireAcondicionado.id == aire_id).first()
+        
+        if aire:
+            aire.nombre = nombre
+            aire.ubicacion = ubicacion
+            aire.fecha_instalacion = fecha_instalacion
+            
+            session.commit()
+            return True
+        
+        return False
     
     def agregar_lectura(self, aire_id, fecha, temperatura, humedad):
         # Crear nueva lectura en la base de datos
@@ -149,6 +174,25 @@ class DataManager:
         ]
         
         return pd.DataFrame(lecturas_data)
+        
+    def eliminar_lectura(self, lectura_id):
+        """
+        Elimina una lectura por su ID.
+        
+        Args:
+            lectura_id: ID de la lectura a eliminar
+            
+        Returns:
+            True si se eliminó correctamente, False en caso contrario
+        """
+        lectura = session.query(Lectura).filter(Lectura.id == lectura_id).first()
+        
+        if lectura:
+            session.delete(lectura)
+            session.commit()
+            return True
+        
+        return False
     
     def obtener_estadisticas_por_aire(self, aire_id):
         # Consultar estadísticas de un aire específico desde la base de datos
