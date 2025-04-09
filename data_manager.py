@@ -238,6 +238,108 @@ class DataManager:
             },
             'total_lecturas': result.total_lecturas or 0
         }
+        
+    def obtener_ubicaciones(self):
+        """
+        Obtiene todas las ubicaciones únicas de los aires acondicionados.
+        
+        Returns:
+            Lista de ubicaciones únicas
+        """
+        ubicaciones = session.query(distinct(AireAcondicionado.ubicacion)).all()
+        return [ubicacion[0] for ubicacion in ubicaciones]
+    
+    def obtener_aires_por_ubicacion(self, ubicacion):
+        """
+        Obtiene los aires acondicionados en una ubicación específica.
+        
+        Args:
+            ubicacion: La ubicación a filtrar
+            
+        Returns:
+            DataFrame con los aires en esa ubicación
+        """
+        aires = session.query(AireAcondicionado).filter(AireAcondicionado.ubicacion == ubicacion).all()
+        
+        # Convertir a DataFrame
+        aires_data = [
+            {
+                'id': aire.id,
+                'nombre': aire.nombre,
+                'ubicacion': aire.ubicacion,
+                'fecha_instalacion': aire.fecha_instalacion
+            }
+            for aire in aires
+        ]
+        
+        return pd.DataFrame(aires_data)
+    
+    def obtener_estadisticas_por_ubicacion(self, ubicacion=None):
+        """
+        Obtiene estadísticas agrupadas por ubicación.
+        
+        Args:
+            ubicacion: Opcional, filtrar por una ubicación específica
+            
+        Returns:
+            DataFrame con estadísticas por ubicación
+        """
+        # Si no hay lecturas o aires, devolver DataFrame vacío
+        aires_count = session.query(AireAcondicionado).count()
+        if aires_count == 0:
+            return pd.DataFrame()
+        
+        # Obtener todas las ubicaciones o la ubicación específica
+        if ubicacion:
+            ubicaciones = [ubicacion]
+        else:
+            ubicaciones = self.obtener_ubicaciones()
+        
+        # Lista para almacenar resultados
+        resultados = []
+        
+        # Para cada ubicación, obtener sus aires y estadísticas
+        for ubicacion_actual in ubicaciones:
+            # Obtener IDs de aires en esta ubicación
+            aires_ids = session.query(AireAcondicionado.id).filter(
+                AireAcondicionado.ubicacion == ubicacion_actual
+            ).all()
+            aires_ids = [aire_id[0] for aire_id in aires_ids]
+            
+            if not aires_ids:
+                continue
+            
+            # Consultar estadísticas para estos aires
+            result = session.query(
+                func.avg(Lectura.temperatura).label('temp_avg'),
+                func.min(Lectura.temperatura).label('temp_min'),
+                func.max(Lectura.temperatura).label('temp_max'),
+                func.stddev(Lectura.temperatura).label('temp_std'),
+                func.avg(Lectura.humedad).label('hum_avg'),
+                func.min(Lectura.humedad).label('hum_min'),
+                func.max(Lectura.humedad).label('hum_max'),
+                func.stddev(Lectura.humedad).label('hum_std'),
+                func.count(distinct(Lectura.id)).label('total_lecturas')
+            ).filter(Lectura.aire_id.in_(aires_ids)).first()
+            
+            # Si hay lecturas para esta ubicación
+            if result.temp_avg is not None:
+                resultados.append({
+                    'ubicacion': ubicacion_actual,
+                    'num_aires': len(aires_ids),
+                    'temperatura_promedio': round(result.temp_avg, 2) if result.temp_avg else 0,
+                    'temperatura_min': round(result.temp_min, 2) if result.temp_min else 0,
+                    'temperatura_max': round(result.temp_max, 2) if result.temp_max else 0,
+                    'temperatura_std': round(result.temp_std, 2) if result.temp_std else 0,
+                    'humedad_promedio': round(result.hum_avg, 2) if result.hum_avg else 0,
+                    'humedad_min': round(result.hum_min, 2) if result.hum_min else 0,
+                    'humedad_max': round(result.hum_max, 2) if result.hum_max else 0,
+                    'humedad_std': round(result.hum_std, 2) if result.hum_std else 0,
+                    'lecturas_totales': result.total_lecturas or 0
+                })
+        
+        # Convertir resultados a DataFrame
+        return pd.DataFrame(resultados)
     
     def eliminar_aire(self, aire_id):
         # Obtener el aire a eliminar

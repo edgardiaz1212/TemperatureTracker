@@ -529,6 +529,7 @@ def mostrar_analisis_estadisticas():
     # Opciones de análisis
     analisis_options = [
         "Estadísticas Generales",
+        "Análisis por Ubicación",
         "Variabilidad de Temperatura",
         "Variabilidad de Humedad",
         "Reporte Completo"
@@ -649,6 +650,151 @@ def mostrar_analisis_estadisticas():
             st.plotly_chart(fig_temp, use_container_width=True)
             st.plotly_chart(fig_hum, use_container_width=True)
     
+    elif analisis_seleccionado == "Análisis por Ubicación":
+        # Mostrar análisis por ubicación
+        st.subheader("Análisis por Ubicación")
+        
+        # Obtener estadísticas por ubicación
+        stats_ubicacion_df = data_manager.obtener_estadisticas_por_ubicacion()
+        
+        if stats_ubicacion_df.empty:
+            st.info("No hay suficientes datos para generar estadísticas por ubicación. Asegúrate de tener aires acondicionados en diferentes ubicaciones con lecturas registradas.")
+            return
+        
+        # Mostrar tabla de estadísticas por ubicación
+        st.write("### Comparativa entre Ubicaciones")
+        
+        # Renombrar columnas para mostrar
+        stats_display = stats_ubicacion_df[[
+            'ubicacion',
+            'num_aires',
+            'temperatura_promedio',
+            'temperatura_min',
+            'temperatura_max',
+            'temperatura_std',
+            'humedad_promedio',
+            'humedad_min',
+            'humedad_max',
+            'humedad_std',
+            'lecturas_totales'
+        ]].copy()
+        
+        stats_display.columns = [
+            'Ubicación',
+            'Nº Aires',
+            'Temp. Promedio (°C)',
+            'Temp. Mínima (°C)',
+            'Temp. Máxima (°C)',
+            'Temp. Desv. Estándar',
+            'Humedad Promedio (%)',
+            'Humedad Mínima (%)',
+            'Humedad Máxima (%)',
+            'Humedad Desv. Estándar',
+            'Total Lecturas'
+        ]
+        
+        st.dataframe(stats_display, use_container_width=True)
+        
+        # Crear gráficos comparativos entre ubicaciones
+        st.write("### Gráficos Comparativos por Ubicación")
+        
+        # Gráfico de temperaturas promedio por ubicación
+        fig_temp_ubicacion = px.bar(
+            stats_ubicacion_df, 
+            x='ubicacion', 
+            y='temperatura_promedio',
+            error_y='temperatura_std',
+            title='Temperatura Promedio por Ubicación',
+            labels={'ubicacion': 'Ubicación', 'temperatura_promedio': 'Temperatura Promedio (°C)'},
+            color='ubicacion',
+            color_discrete_sequence=px.colors.qualitative.Plotly
+        )
+        
+        # Personalizar el diseño
+        fig_temp_ubicacion.update_layout(
+            xaxis_title="Ubicación",
+            yaxis_title="Temperatura (°C)",
+            legend_title="Ubicación",
+            height=500
+        )
+        
+        st.plotly_chart(fig_temp_ubicacion, use_container_width=True)
+        
+        # Gráfico de humedad promedio por ubicación
+        fig_hum_ubicacion = px.bar(
+            stats_ubicacion_df, 
+            x='ubicacion', 
+            y='humedad_promedio',
+            error_y='humedad_std',
+            title='Humedad Promedio por Ubicación',
+            labels={'ubicacion': 'Ubicación', 'humedad_promedio': 'Humedad Promedio (%)'},
+            color='ubicacion',
+            color_discrete_sequence=px.colors.qualitative.Plotly
+        )
+        
+        # Personalizar el diseño
+        fig_hum_ubicacion.update_layout(
+            xaxis_title="Ubicación",
+            yaxis_title="Humedad (%)",
+            legend_title="Ubicación",
+            height=500
+        )
+        
+        st.plotly_chart(fig_hum_ubicacion, use_container_width=True)
+        
+        # Seleccionar ubicación específica para análisis detallado
+        st.subheader("Análisis Detallado por Ubicación")
+        
+        # Obtener todas las ubicaciones
+        ubicaciones = data_manager.obtener_ubicaciones()
+        
+        if ubicaciones:
+            ubicacion_seleccionada = st.selectbox(
+                "Seleccionar Ubicación:",
+                options=ubicaciones
+            )
+            
+            # Obtener aires en esta ubicación
+            aires_ubicacion_df = data_manager.obtener_aires_por_ubicacion(ubicacion_seleccionada)
+            
+            if not aires_ubicacion_df.empty:
+                st.write(f"### Aires Acondicionados en {ubicacion_seleccionada}")
+                st.dataframe(aires_ubicacion_df, use_container_width=True)
+                
+                # Obtener estadísticas específicas de esta ubicación
+                ubicacion_stats = data_manager.obtener_estadisticas_por_ubicacion(ubicacion_seleccionada).iloc[0] if not data_manager.obtener_estadisticas_por_ubicacion(ubicacion_seleccionada).empty else None
+                
+                if ubicacion_stats is not None:
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        st.write("### Temperatura")
+                        st.metric("Promedio", f"{ubicacion_stats['temperatura_promedio']} °C")
+                        st.metric("Desviación Estándar", f"{ubicacion_stats['temperatura_std']} °C")
+                        st.metric("Rango", f"{ubicacion_stats['temperatura_min']} - {ubicacion_stats['temperatura_max']} °C")
+                    
+                    with col2:
+                        st.write("### Humedad")
+                        st.metric("Promedio", f"{ubicacion_stats['humedad_promedio']} %")
+                        st.metric("Desviación Estándar", f"{ubicacion_stats['humedad_std']} %")
+                        st.metric("Rango", f"{ubicacion_stats['humedad_min']} - {ubicacion_stats['humedad_max']} %")
+            else:
+                st.info(f"No hay aires acondicionados registrados en la ubicación {ubicacion_seleccionada}")
+        else:
+            st.info("No hay ubicaciones registradas")
+        
+        # Información adicional
+        st.write("""
+        **Nota sobre el análisis por ubicación:**
+        
+        - Este análisis ayuda a identificar patrones y diferencias entre distintas áreas o zonas donde están instalados los aires acondicionados.
+        - Una diferencia significativa en las temperaturas o humedades promedio entre ubicaciones puede indicar:
+            - Diferencias en la eficiencia de los equipos
+            - Variaciones en la carga térmica de cada zona
+            - Posibles problemas de instalación o mantenimiento en ubicaciones específicas
+        - La desviación estándar alta en una ubicación específica puede indicar condiciones variables o inconsistentes.
+        """)
+
     elif analisis_seleccionado == "Variabilidad de Temperatura":
         # Mostrar análisis de variabilidad de temperatura
         st.subheader("Análisis de Variabilidad de Temperatura")
